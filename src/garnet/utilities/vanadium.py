@@ -47,6 +47,7 @@ from mantid.simpleapi import (
     CopyInstrumentParameters,
     GenerateGoniometerIndependentBackground,
     SaveDetectorsGrouping,
+    FilterBadPulses,
     mtd,
 )
 
@@ -277,6 +278,8 @@ class Vanadium:
             AllowList="gd_prtn_chrg",
             OutputWorkspace=workspace,
         )
+
+        FilterBadPulses(InputWorkspace=workspace, OutputWorkspace=workspace)
 
         NormaliseByCurrent(InputWorkspace=workspace, OutputWorkspace=workspace)
 
