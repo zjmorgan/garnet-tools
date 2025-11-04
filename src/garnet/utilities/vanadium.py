@@ -71,6 +71,8 @@ class Vanadium:
             "MomentumLimits": [1.8, 18],
             "MaskOptions": None,
             "Grouping": [4, 4],
+            "VanadiumTimeStop": None,
+            "NoSampleTimeStop": None,
         }
 
         defaults.update(config)
@@ -82,6 +84,9 @@ class Vanadium:
 
         self.bkg_ipts = defaults.get("NoSampleIPTS")
         self.bkg_nos = defaults.get("NoSampleRuns")
+
+        self.van_time_stop = defaults.get("VanadiumTimeStop")
+        self.bkg_time_stop = defaults.get("NoSampleTimeStop")
 
         self.output_folder = defaults.get("OutputFolder")
 
@@ -257,7 +262,7 @@ class Vanadium:
 
         return runs
 
-    def load_runs(self, workspace, ipts, run_nos):
+    def load_runs(self, workspace, ipts, run_nos, time_stop=None):
         if not isinstance(run_nos, list):
             run_nos = self._runs_string_to_list(run_nos)
 
@@ -277,6 +282,7 @@ class Vanadium:
             LoadType="Multiprocess (experimental)",
             AllowList="gd_prtn_chrg,proton_charge",
             OutputWorkspace=workspace,
+            FilterByTimeStop=time_stop,
         )
 
         FilterBadPulses(InputWorkspace=workspace, OutputWorkspace=workspace)
@@ -683,8 +689,12 @@ class Vanadium:
         self.load_instrument()
         self.apply_masks()
         self.apply_calibration()
-        self.load_runs("vanadium", self.van_ipts, self.van_nos)
-        self.load_runs("background", self.bkg_ipts, self.bkg_nos)
+        self.load_runs(
+            "vanadium", self.van_ipts, self.van_nos, self.van_time_stop
+        )
+        self.load_runs(
+            "background", self.bkg_ipts, self.bkg_nos, self.bkg_time_stop
+        )
         self.subtract_background()
         self.set_sample_geometry()
         self.apply_absorption_correction()
