@@ -275,7 +275,7 @@ class Vanadium:
             Filename=files_to_load,
             NumberOfBins=1,
             LoadType="Multiprocess (experimental)",
-            AllowList="gd_prtn_chrg",
+            AllowList="gd_prtn_chrg,proton_charge",
             OutputWorkspace=workspace,
         )
 
