@@ -13,7 +13,6 @@ from mantid.simpleapi import (
     SortPeaksWorkspace,
     CombinePeaksWorkspaces,
     StatisticsOfPeaksWorkspace,
-    CreatePeaksWorkspace,
     SaveHKL,
     SaveReflections,
     SaveIsawUB,

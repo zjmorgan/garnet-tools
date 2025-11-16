@@ -1,9 +1,8 @@
-import pyoncat
-
-import numpy as np
-
+import os
 import sys
 import traceback
+
+import numpy as np
 
 from qtpy.QtWidgets import (
     QApplication,
@@ -33,6 +32,12 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
+
+import pyoncat
+
+directory = os.path.dirname(os.path.realpath(__file__))
+directory = os.path.abspath(os.path.join(directory, ".."))
+sys.path.append(directory)
 
 from garnet.config.instruments import beamlines
 
