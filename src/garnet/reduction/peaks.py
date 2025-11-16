@@ -1172,7 +1172,7 @@ class PeaksModel:
             BankName="None",
         )
 
-    def create_peaks(self, ws, peaks):
+    def create_peaks(self, ws, peaks, lean=False):
         """
         Create a new peaks table.
 
@@ -1184,7 +1184,10 @@ class PeaksModel:
         """
 
         CreatePeaksWorkspace(
-            InstrumentWorkspace=ws, NumberOfPeaks=0, OutputWorkspace=peaks
+            InstrumentWorkspace=ws if not lean else None,
+            NumberOfPeaks=0,
+            OutputWorkspace=peaks,
+            OutputType="Peak" if not lean else "LeanElasticPeak",
         )
 
         CopySample(
@@ -1312,6 +1315,23 @@ class PeakModel:
         peak = mtd[self.peaks].getPeak(no)
 
         return peak.getWavelength()
+
+    def set_wavelength(self, no, lamda):
+        """
+        Update the wavelength of the peak.
+
+        Parameters
+        ----------
+        no : int
+            Peak index number.
+        lamda : float
+            Wavelength in angstroms.
+
+        """
+
+        peak = mtd[self.peaks].getPeak(no)
+
+        peak.setWavelength(lamda)
 
     def get_sample_Q(self, no):
         """
@@ -1482,7 +1502,7 @@ class PeakModel:
                 items = np.array(items).tolist()
             run_info[log] = items
 
-    def get_peak_name(self, no):
+    def get_peak_name(self, no, merge=False):
         """
         Name of peak.
 
@@ -1518,11 +1538,15 @@ class PeakModel:
         else:
             d = peak.getDSpacing()
 
-        name = (
-            "peak_d={:.4f}_({:d},{:d},{:d})"
-            + "_({:d},{:d},{:d})/lambda={:.4f}_run#{:d}"
-        )
-        return name.format(d, *hkl, *mnp, lamda, run)
+        if not merge:
+            name = (
+                "peak_d={:.4f}_({:d},{:d},{:d})"
+                + "_({:d},{:d},{:d})/lambda={:.4f}_run#{:d}"
+            )
+            return name.format(d, *hkl, *mnp, lamda, run)
+        else:
+            name = "peak_d={:.4f}_({:d},{:d},{:d})_({:d},{:d},{:d})"
+            return name.format(d, *hkl, *mnp)
 
     def get_hkl(self, no):
         """
@@ -1542,6 +1566,46 @@ class PeakModel:
 
         peak = mtd[self.peaks].getPeak(no)
         return list(peak.getHKL())
+
+    def get_hklmnp(self, no):
+        """
+        Miller indices.
+
+        Parameters
+        ----------
+        no : int
+            Peak index number.
+
+        Returns
+        -------
+        hklmnp : tuple
+            Components of Miller indices.
+
+        """
+
+        peak = mtd[self.peaks].getPeak(no)
+        hkl = np.array(peak.getIntHKL()).astype(int).tolist()
+        mnp = np.array(peak.getIntMNP()).astype(int).tolist()
+        return tuple(hkl + mnp)
+
+    def set_hklmnp(self, no, hklmnp):
+        """
+        Update Miller indices.
+
+        Parameters
+        ----------
+        no : int
+            Peak index number.
+        hklmnp : list
+            Components of Miller indices.
+
+        """
+
+        h, k, l, m, n, p = hklmnp
+
+        peak = mtd[self.peaks].getPeak(no)
+        peak.setIntHKL(V3D(h, k, l))
+        peak.setIntMNP(V3D(m, n, p))
 
     def get_peak_shape(self, no, r_cut=np.inf):
         """

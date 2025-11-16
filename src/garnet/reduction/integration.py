@@ -1,4 +1,6 @@
 import os
+import re
+import glob
 import subprocess
 import numpy as np
 
@@ -109,6 +111,10 @@ class Integration(SubPlan):
         pp = ParallelProcessor(n_proc=self.n_proc)
         return pp.process_dict(data, self.fit_peaks)
 
+    def integrate_merge(self, data):
+        pp = ParallelProcessor(n_proc=self.n_proc)
+        return pp.process_dict(data, self.merge_peaks)
+
     @staticmethod
     def combine_parallel(plan, files):
         instance = Integration(plan)
@@ -118,6 +124,15 @@ class Integration(SubPlan):
     def combine(self, files):
         output_file = self.get_output_file()
         result_file = self.get_file(output_file, "")
+
+        data = DataModel(beamlines[self.plan["Instrument"]])
+        data.update_raw_path(self.plan)
+
+        self.data = data
+        self.status = "merge"
+
+        self.make_plot = True
+        self.peak_plot = PeakPlot()
 
         peaks = PeaksModel()
 
@@ -131,6 +146,20 @@ class Integration(SubPlan):
 
         if mtd.doesExist("combine"):
             peaks.save_peaks(result_file, "combine")
+
+            peaks.create_peaks("combine", "merge", lean=True)
+
+            peak_dict = self.extract_merge_peak_info("combine")
+
+            self.n_proc = self.plan["NProc"]
+
+            results = self.integrate_merge(peak_dict)
+
+            self.update_merge_info("merge", results)
+
+            pk_file = self.get_diagnostic_file("merge")
+
+            peaks.save_peaks(pk_file, "merge")
 
             opt = Optimization("combine")
             opt.optimize_lattice(self.params["Cell"])
@@ -725,34 +754,12 @@ class Integration(SubPlan):
         ellipsoid = PeakEllipsoid()
 
         params, value = None, None
-        if all([item is not None for item in interp]):
-            try:
-                args = (Q0, Q1, Q2, d, n, gd, gn, val_mask, det_mask, dQ, Q)
-                params = ellipsoid.fit(*args)
-            except Exception as e:
-                print("Exception fitting data: {}".format(e))
-                return key, value
-        else:
-            result = self.quick_fit(Q0, Q1, Q2, d, n)
-
-            (
-                c,
-                S,
-                sphere,
-                info,
-                best_prof,
-                best_proj,
-                best_fit,
-                data_norm_fit,
-                peak_background_mask,
-                redchi2,
-                intensity,
-                sigma,
-                intens,
-                sig,
-            ) = result
-
-            shape = self.revert_ellipsoid_parameters(sphere, projections)
+        try:
+            args = (Q0, Q1, Q2, d, n, gd, gn, val_mask, det_mask, dQ, Q)
+            params = ellipsoid.fit(*args)
+        except Exception as e:
+            print("Exception fitting data: {}".format(e))
+            return key, value
 
         print(self.status + " 2/2 {:}/{:}".format(key, self.total))
 
@@ -804,6 +811,154 @@ class Integration(SubPlan):
                 return key, None
 
             value = intens, sig, shape, [*info, *shape[:3], self.cntrt], hkl
+
+        return key, value
+
+    def merge_peaks(self, key_value):
+        key, value = key_value
+
+        data_infos, peak_infos = value
+
+        Q0_min, Q1_min, Q2_min = [], [], []
+        Q0_max, Q1_max, Q2_max = [], [], []
+        Q0_bin, Q1_bin, Q2_bin = [], [], []
+        fd, fn = [], []
+
+        for data_info in data_infos:
+            Q0, Q1, Q2, d, n, dQ, Q, projections = data_info
+
+            Q0_min.append(Q0[0, 0, 0])
+            Q1_min.append(Q1[0, 0, 0])
+            Q2_min.append(Q2[0, 0, 0])
+
+            Q0_max.append(Q0[-1, 0, 0])
+            Q1_max.append(Q1[0, -1, 0])
+            Q2_max.append(Q2[0, 0, -1])
+
+            Q0_bin.append(Q0[1, 0, 0] - Q0[0, 0, 0])
+            Q1_bin.append(Q1[0, 1, 0] - Q1[0, 0, 0])
+            Q2_bin.append(Q2[0, 0, 1] - Q2[0, 0, 0])
+
+            di = scipy.interpolate.RegularGridInterpolator(
+                (Q0[:, 0, 0], Q1[0, :, 0], Q2[0, 0, :]),
+                d,
+                method="nearest",
+                fill_value=0,
+                bounds_error=False,
+            )
+
+            ni = scipy.interpolate.RegularGridInterpolator(
+                (Q0[:, 0, 0], Q1[0, :, 0], Q2[0, 0, :]),
+                n,
+                method="nearest",
+                fill_value=0,
+                bounds_error=False,
+            )
+
+            fd.append(di)
+            fn.append(ni)
+
+        Q0_min, Q0_max, Q0_bin = np.min(Q0_min), np.max(Q0_max), np.min(Q0_bin)
+        Q1_min, Q1_max, Q1_bin = np.min(Q1_min), np.max(Q1_max), np.min(Q1_bin)
+        Q2_min, Q2_max, Q2_bin = np.min(Q2_min), np.max(Q2_max), np.min(Q2_bin)
+
+        dQ = np.min([Q0_bin, Q1_bin, Q2_bin])
+
+        n0 = int(round((Q0_max - Q0_min) / Q0_bin / 2)) + 1
+        n1 = int(round((Q1_max - Q1_min) / Q1_bin / 2)) + 1
+        n2 = int(round((Q2_max - Q2_min) / Q2_bin / 2)) + 1
+
+        Q0, Q1, Q2 = np.meshgrid(
+            np.linspace(Q0_min, Q0_max, n0),
+            np.linspace(Q1_min, Q1_max, n1),
+            np.linspace(Q2_min, Q2_max, n2),
+            indexing="ij",
+        )
+
+        pts = np.column_stack([Q0.ravel(), Q1.ravel(), Q2.ravel()])
+
+        for i, peak_info in enumerate(peak_infos):
+            if i == 0:
+                gd = fd[i](pts).reshape(Q0.shape)
+                gn = fn[i](pts).reshape(Q0.shape)
+            else:
+                gd += fd[i](pts).reshape(Q0.shape)
+                gn += fn[i](pts).reshape(Q0.shape)
+
+            (
+                peak_file,
+                hkl,
+                d_spacing,
+                wavelength,
+                angles,
+                goniometer,
+            ) = peak_info
+
+        d = gd.copy()
+        n = gn.copy()
+
+        det_mask = self.detection_mask(n)
+        val_mask = det_mask.copy()
+
+        ellipsoid = PeakEllipsoid()
+
+        params, value = None, None
+        try:
+            args = (Q0, Q1, Q2, d, n, gd, gn, val_mask, det_mask, dQ, Q)
+            params = ellipsoid.fit(*args)
+        except Exception as e:
+            print("Exception fitting data: {}".format(e))
+            return key, value
+
+        print(self.status + " 2/2 {:}".format(key))
+
+        if params is not None:
+            c, S, *best_fit = ellipsoid.best_fit
+
+            shape = self.revert_ellipsoid_parameters(params, projections)
+
+            norm_params = Q0, Q1, Q2, d, n, val_mask, det_mask, c, S
+
+            try:
+                intens, sig = ellipsoid.integrate(*norm_params)
+            except Exception as e:
+                print("Exception extracting intensity: {}".format(e))
+                return key, value
+
+            best_prof = ellipsoid.best_prof
+            best_proj = ellipsoid.best_proj
+            data_norm_fit = ellipsoid.data_norm_fit
+            redchi2 = ellipsoid.redchi2
+            intensity = ellipsoid.intensity
+            sigma = ellipsoid.sigma
+            peak_background_mask = ellipsoid.peak_background_mask
+
+        if self.make_plot and params is not None:
+            self.peak_plot.add_ellipsoid_fit(best_fit)
+
+            self.peak_plot.add_profile_fit(best_prof)
+
+            self.peak_plot.add_projection_fit(best_proj)
+
+            self.peak_plot.add_ellipsoid(c, S)
+
+            self.peak_plot.update_envelope(*peak_background_mask)
+
+            self.peak_plot.add_peak_info(
+                hkl, d_spacing, wavelength, angles, goniometer
+            )
+
+            self.peak_plot.add_peak_stats(redchi2, intensity, sigma)
+
+            self.peak_plot.add_data_norm_fit(*data_norm_fit)
+
+            try:
+                self.peak_plot.save_plot(peak_file)
+            except Exception as e:
+                print("Exception saving figure: {}".format(e))
+                return key, None
+
+            value = intens, sig, shape, [key, wavelength], hkl
 
         return key, value
 
@@ -948,6 +1103,106 @@ class Integration(SubPlan):
 
         return peak_dict
 
+    def extract_merge_peak_info(self, peaks_ws):
+        """
+        Obtain peak information for merge integration.
+
+        Parameters
+        ----------
+        peaks_ws : str
+            Peaks table.
+
+        """
+
+        data = self.data
+
+        peak = PeakModel(peaks_ws)
+
+        n_peak = peak.get_number_peaks()
+
+        peak_dict = {}
+
+        self.total = n_peak
+
+        for i in range(n_peak):
+            print(self.status + " 1/2 {:}/{:}".format(i, self.total))
+
+            d_spacing = peak.get_d_spacing(i)
+            Q = 2 * np.pi / d_spacing
+
+            hkl = peak.get_hkl(i)
+
+            hklmnp = peak.get_hklmnp(i)
+
+            lamda = peak.get_wavelength(i)
+
+            goniometer = peak.get_goniometer_angles(i)
+
+            angles = peak.get_angles(i)
+
+            two_theta, az_phi = angles
+
+            dQ = data.get_resolution_in_Q(lamda, two_theta)
+
+            R = peak.get_goniometer_matrix(i)
+
+            n, u, v = self.bin_axes(R, two_theta, az_phi)
+
+            projections = np.column_stack([n, u, v])
+
+            peak_name = peak.get_peak_name(i)
+
+            data_file = self.get_diagnostic_file(peak_name + "_data")
+            norm_file = self.get_diagnostic_file(peak_name + "_norm")
+
+            directory = os.path.dirname(data_file)
+            filename = os.path.basename(data_file)
+
+            pattern = re.sub(r"lambda=[0-9.]+", "lambda=*", filename)
+            search_pattern = os.path.join(directory, pattern)
+
+            if len(glob.glob(search_pattern)) == 1:
+                data_file = glob.glob(search_pattern)[0]
+
+                directory = os.path.dirname(norm_file)
+                filename = os.path.basename(norm_file)
+
+                pattern = re.sub(r"lambda=[0-9.]+", "lambda=*", filename)
+                search_pattern = os.path.join(directory, pattern)
+
+                norm_file = glob.glob(search_pattern)[0]
+
+                data.load_histograms(data_file, "md_data")
+                data.load_histograms(norm_file, "md_norm")
+
+                d, _, Q0, Q1, Q2 = data.extract_bin_info("md_data")
+                n, _, Q0, Q1, Q2 = data.extract_bin_info("md_norm")
+
+                data_info = (Q0, Q1, Q2, d, n, dQ, Q, projections)
+
+                peak_name = peak.get_peak_name(i, merge=True)
+
+                peak_file = self.get_plot_file(peak_name)
+
+                peak_info = (
+                    peak_file,
+                    hkl,
+                    d_spacing,
+                    lamda,
+                    angles,
+                    goniometer,
+                )
+
+                items = peak_dict.get(hklmnp)
+                if items is None:
+                    items = [], []
+                items[0].append(data_info)
+                items[1].append(peak_info)
+
+                peak_dict[hklmnp] = items
+
+        return peak_dict
+
     def update_peak_offsets(self, peaks_ws, offsets, peak_dict):
         peak = PeakModel(peaks_ws)
 
@@ -980,6 +1235,29 @@ class Integration(SubPlan):
                 peak.set_peak_shape(i, *shape)
 
                 peak.add_diagonstic_info(i, info)
+
+    def update_merge_info(self, peaks_ws, peak_dict):
+        peaks = PeaksModel()
+        peak = PeakModel(peaks_ws)
+
+        i = 0
+        for key, value in peak_dict.items():
+            if value is not None:
+                I, sigma, shape, info, hkl = value
+
+                peaks.add_peak(peaks_ws, hkl)
+
+                hklmnp, lamda = info
+
+                peak.set_peak_intensity(i, I, sigma)
+
+                peak.set_wavelength(i, lamda)
+
+                peak.set_hklmnp(i, hklmnp)
+
+                peak.set_peak_shape(i, *shape)
+
+                i += 1
 
     def bin_axes(self, R, two_theta, az_phi):
         two_theta = np.deg2rad(two_theta)
@@ -3344,8 +3622,8 @@ class PeakEllipsoid:
 
         ratio = vol_pk / vol_bkg if vol_bkg > 0 else 0
 
-        intens = (pk_intens - ratio * bkg_intens) / frac
-        sig = np.sqrt(pk_err + ratio**2 * bkg_err**2) / frac
+        intens = pk_intens - ratio * bkg_intens  # / frac
+        sig = np.sqrt(pk_err + ratio**2 * bkg_err**2)  # / frac
 
         if not sig > 0:
             sig = float("inf")
@@ -3385,8 +3663,8 @@ class PeakEllipsoid:
 
         signal_to_noise = intens_raw / sig_raw
 
-        sig = 1 / signal_to_noise * intens
-        intens = signal_to_noise**2 / (signal_to_noise**2 + 4) * intens
+        # sig = 1 / signal_to_noise * intens
+        # intens = signal_to_noise**2 / (signal_to_noise**2 + 4) * intens
 
         self.info += [intens_raw, sig_raw]
 

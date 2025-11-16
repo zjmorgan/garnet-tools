@@ -1344,6 +1344,7 @@ class Peaks:
             I0 = np.nanpercentile(I, 99)
             scale = maximal / I0
             self.scale = scale
+            self.maximal = maximal
 
         indices = np.arange(mtd[self.peaks].getNumberPeaks())
         for i, peak in zip(indices.tolist(), mtd[self.peaks]):
@@ -1528,6 +1529,9 @@ class Peaks:
 
     def load_peaks(self):
         LoadNexus(Filename=self.filename, OutputWorkspace=self.peaks)
+
+        merge = self.filename.replace(".nxs", "_diagnostics/merge.nxs")
+        LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
 
         shape_dict = {}
 
@@ -1877,204 +1881,48 @@ class Peaks:
             peaks = self.peaks
             app = ""
 
-        CreatePeaksWorkspace(
-            NumberOfPeaks=0,
-            OutputWorkspace=peaks + "_lean",
-            OutputType="LeanElasticPeak",
-        )
-
         CopySample(
             InputWorkspace=peaks,
-            OutputWorkspace=peaks + "_lean",
+            OutputWorkspace=peaks + "_merge",
             CopyName=False,
             CopyEnvironment=False,
         )
 
-        peaks_lean = mtd[peaks + "_lean"]
-
-        ol = mtd[peaks].sample().getOrientedLattice()
-        mod_HKL = ol.getModHKL().copy()
-
-        fit_dict = {}
-        ellipsoid_dict = {}
-
-        for peak in mtd[peaks]:
-            h, k, l = [int(val) for val in peak.getIntHKL()]
-            m, n, p = [int(val) for val in peak.getIntMNP()]
-
-            run = int(peak.getPeakNumber())
-            key = (run, h, k, l, m, n, p)
-
-            intens = peak.getIntensity()
-            sigma = peak.getSigmaIntensity()
-            lamda = peak.getWavelength()
-            Tbar = peak.getAbsorptionWeightedPathLength() * 1e8  # Ang
-
-            N, vol, pk_data, pk_norm, bkg_data, bkg_norm = self.info_dict[key]
-
-            key = (h, k, l, m, n, p)
-
-            items = fit_dict.get(key)
-            if items is None:
-                items = [], [], [], [], [], [], [], [], [], []
-            items[0].append(N)
-            items[1].append(vol)
-            items[2].append(pk_data)
-            items[3].append(pk_norm)
-            items[4].append(bkg_data)
-            items[5].append(bkg_norm)
-            items[6].append(lamda)
-            items[7].append(Tbar)
-            items[8].append(intens)
-            items[9].append(sigma)
-            fit_dict[key] = items
-
-            key = (run, h, k, l, m, n, p)
-
-            c, S_inv, min_bounds, max_bounds = self.shape_dict[key]
-
-            key = (h, k, l, m, n, p)
-
-            items = ellipsoid_dict.get(key)
-            if items is None:
-                items = [], [], [], []
-            items[0].append(c)
-            items[1].append(S_inv)
-            items[2].append(min_bounds)
-            items[3].append(max_bounds)
-            ellipsoid_dict[key] = items
-
-        for key in fit_dict.keys():
-            items = fit_dict.get(key)
-            items = [np.array(item) for item in items]
-            fit_dict[key] = items
-
-        for key in ellipsoid_dict.keys():
-            items = ellipsoid_dict.get(key)
-            mins = np.min(items[2], axis=0)
-            maxs = np.max(items[3], axis=0)
-            items = np.array(items[0]), np.array(items[1]), mins, maxs
-            ellipsoid_dict[key] = items
-
-        F2, Q, y = [], [], []
-
-        for key in fit_dict.keys():
-            h, k, l, m, n, p = key
-            hkl = np.array([h, k, l]) + np.dot(mod_HKL, [m, n, p])
-            peak = peaks_lean.createPeakHKL(hkl.tolist())
-            peak.setIntHKL(V3D(h, k, l))
-            peak.setIntMNP(V3D(m, n, p))
-
-            d = peak.getDSpacing()
-
-            items = fit_dict[key]
-            (
-                N,
-                d3x,
-                pk_data,
-                pk_norm,
-                bkg_data,
-                bkg_norm,
-                lamda,
-                Tbar,
-                I,
-                sigma,
-            ) = items
-
-            norm = np.nansum(pk_norm)
-            data = np.nansum(pk_data)
-
-            volume = N * d3x
-
-            w = pk_norm / N
-
-            vol = np.nansum(volume * w) / np.nansum(w)
-
-            b = np.nansum(bkg_data) / np.nansum(bkg_norm)
-            b_err = np.sqrt(np.nansum(bkg_data)) / np.nansum(bkg_norm)
-
-            wl = np.nansum(lamda * w) / np.nansum(w)
-            wpl = np.nansum(Tbar * w) / np.nansum(w)
-
-            intens = self.scale * (data / norm - b) * vol
-            sig_ext = self.scale * np.sqrt(data / norm**2 + b_err**2) * vol
-
-            sig_int = np.sqrt(np.nanmean((I - intens) ** 2))
-
-            if sig_int > 0 and sig_ext > 0 and intens > 0:
-                Q.append(2 * np.pi / d)
-                F2.append(intens)
-                y.append(sig_int / sig_ext)
-
-            peak.setIntensity(intens)
-            peak.setSigmaIntensity(sig_ext)
-            peak.setBinCount(sig_int)
-            peak.setWavelength(wl)
-            peak.setAbsorptionWeightedPathLength(wpl * 1e-8)
-            peaks_lean.addPeak(peak)
-
-        # F2, Q, y = np.array(F2), np.array(Q), np.array(y)
-
-        # A = np.column_stack(
-        #     [
-        #         np.log(F2) ** 2,
-        #         Q**2,
-        #         np.log(F2) * Q,
-        #         np.log(F2),
-        #         Q,
-        #         np.ones_like(y),
-        #     ]
-        # )
-        # x, *_ = np.linalg.lstsq(A, y)
-
-        # y_fit = np.dot(A, x)
-
         filename = os.path.splitext(self.filename)[0] + app + "_merge"
 
-        # vmin, vmax = [np.min(y), np.max(y)] if len(y) > 1 else [0.1, 10]
-
-        # label = "$\sigma_\mathrm{int}/\sigma_\mathrm{ext}$"
-
-        # fig, ax = plt.subplots(1, 2, sharey=True, layout="constrained")
-        # ax[0].minorticks_on()
-        # ax[1].minorticks_on()
-        # ax[0].set_yscale("log")
-        # ax[1].set_yscale("log")
-        # im = ax[0].scatter(Q, F2, c=y, vmin=vmin, vmax=vmax, norm="log")
-        # ax[1].scatter(Q, F2, c=y_fit, vmin=vmin, vmax=vmax, norm="log")
-        # ax[0].set_xlabel("$|Q|$ [$\AA^{-1}]$")
-        # ax[1].set_xlabel("$|Q|$ [$\AA^{-1}]$")
-        # ax[0].set_ylabel("$F^2$ [arb. unit]")
-        # cb = fig.colorbar(im, ax=ax, label=label)
-        # cb.minorticks_on()
-        # fig.savefig(filename + ".pdf")
-
-        # self.x = x
-
         FilterPeaks(
-            InputWorkspace=peaks + "_lean",
-            OutputWorkspace=peaks + "_lean",
+            InputWorkspace=peaks + "_merge",
+            OutputWorkspace=peaks + "_merge",
             FilterVariable="Signal/Noise",
             FilterValue=3,
             Operator=">",
         )
 
+        for peak in mtd[peaks + "_merge"]:
+            peak.setIntensity(self.scale * peak.getIntensity())
+            peak.setSigmaIntensity(self.scale * peak.getSigmaIntensity())
+
+        for peak in mtd[peaks + "_merge"]:
+            if peak.getIntensity() > self.maximal * 10:
+                peak.setIntensity(0.0)
+                peak.setSigmaIntensity(0.0)
+
         for col in ["h", "k", "l", "DSpacing"]:
             SortPeaksWorkspace(
-                InputWorkspace=peaks + "_lean",
-                OutputWorkspace=peaks + "_lean",
+                InputWorkspace=peaks + "_merge",
+                OutputWorkspace=peaks + "_merge",
                 ColumnNameToSortBy=col,
                 SortAscending=False,
             )
 
         SaveReflections(
-            InputWorkspace=peaks + "_lean",
+            InputWorkspace=peaks + "_merge",
             Filename=filename + "_jana.int",
             Format="Jana",
         )
 
         SaveReflections(
-            InputWorkspace=peaks + "_lean",
+            InputWorkspace=peaks + "_merge",
             Filename=filename + "_fullprof.int",
             Format="Fullprof",
         )
@@ -2140,7 +1988,7 @@ class Peaks:
             Operator=">",
         )
 
-        self.merge_intensities(name, fit_dict)
+        self.merge_intensities(name)
 
         # for peak in mtd[peaks]:
         # I = peak.getIntensity()
