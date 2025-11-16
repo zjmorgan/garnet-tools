@@ -138,6 +138,282 @@ class View(QWidget):
     def connect_refresh_button(self, update):
         self.refresh_button.clicked.connect(update)
 
+    def plot_goniometer(
+        self,
+        gonio_values,
+        gonio_names,
+        run_numbers_list,
+        scale_values,
+        subplot_limits,
+        inst_params,
+    ):
+        self.plot.figure.clf()
+
+        if self.get_ipts() == "":
+            return
+
+        self.plot.figure.subplots_adjust(wspace=0.1, top=0.85, bottom=0.1)
+        colors = ["C0", "C1", "C2", "C4"]
+
+        if len(subplot_limits) == 1:
+            ax1 = self.plot.figure.subplots()
+            if self.get_instrument() != "DEMAND":
+                for val, lab, c in zip(gonio_values, gonio_names, colors):
+                    ax1.plot(run_numbers_list, val, ".", color=c, label=lab)
+            else:
+                for val, lab, c in zip(gonio_values, gonio_names, colors):
+                    v = val[:]
+                    for ii in range(len(run_numbers_list)):
+                        if ii == 0:
+                            ax1.errorbar(
+                                run_numbers_list[ii],
+                                v[0][ii],
+                                yerr=np.array(
+                                    [
+                                        abs(v[1][ii] - v[0][ii]),
+                                        abs(v[2][ii] - v[0][ii]),
+                                    ]
+                                ),
+                                fmt=".",
+                                color=c,
+                                label=lab,
+                                elinewidth=0.5,
+                                capsize=2,
+                            )
+                        else:
+                            ax1.errorbar(
+                                run_numbers_list[ii],
+                                v[0][ii],
+                                yerr=np.array(
+                                    [
+                                        abs(v[1][ii] - v[0][ii]),
+                                        abs(v[2][ii] - v[0][ii]),
+                                    ]
+                                ),
+                                fmt=".",
+                                color=c,
+                                elinewidth=0.5,
+                                capsize=2,
+                            )
+
+            ax1.set_ylabel("Goniometer Values (degrees)")
+            if self.get_instrument() != "DEMAND":
+                ax1.set_xlabel("Run Number")
+            else:
+                ax1.set_xlabel("Scan Number")
+                ax1.set_title(f"exp{self.get_experiment()}")
+            ax1.set_xlim(subplot_limits[0][0] - 1, subplot_limits[0][1] + 1)
+            ax1.legend(
+                fontsize="x-small", loc="upper left", bbox_to_anchor=(0, 1.2)
+            )
+            ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax1.ticklabel_format(style="plain", axis="x", useOffset=False)
+
+            ax2 = ax1.twinx()
+            color = "r"
+            ax2.set_ylabel(
+                f'Scale ({inst_params["Scale"].split(".")[-1]})', color=color
+            )
+            ax2.plot(run_numbers_list, scale_values, ".", color=color)
+            ax2.tick_params(axis="y", labelcolor=color)
+            ax2.set_ylim(
+                -0.1 * np.max(scale_values), np.max(scale_values) * 1.1
+            )
+
+        else:
+            axs = self.plot.figure.subplots(
+                1,
+                len(subplot_limits),
+                sharey=True,
+                width_ratios=[l[1] - l[0] + 2 for l in subplot_limits],
+            )
+
+            if self.get_instrument() != "DEMAND":
+                self.plot.figure.supxlabel("Run Number", fontsize="medium")
+            else:
+                self.plot.figure.supxlabel("Scan Number", fontsize="medium")
+                self.plot.figure.suptitle(
+                    f"exp{self.get_experiment()}", fontsize="medium"
+                )
+
+            for i, ax1 in enumerate(axs):
+                lim = subplot_limits[i]
+                lim_range = 1
+                ax1.set_xlim(lim[0] - lim_range, lim[1] + lim_range)
+                ax1.set_ylim(
+                    np.min(gonio_values) - 10, np.max(gonio_values) + 10
+                )
+
+                if i == 0:
+                    ax1.set_ylabel("Goniometer Values (degrees)")
+                    if self.get_instrument() != "DEMAND":
+                        for val, lab, c in zip(
+                            gonio_values, gonio_names, colors
+                        ):
+                            ax1.plot(
+                                run_numbers_list, val, ".", color=c, label=lab
+                            )
+                    else:
+                        for val, lab, c in zip(
+                            gonio_values, gonio_names, colors
+                        ):
+                            v = val[:]
+                            for ii in range(len(run_numbers_list)):
+                                if ii == 0:
+                                    ax1.errorbar(
+                                        run_numbers_list[ii],
+                                        v[0][ii],
+                                        yerr=np.array(
+                                            [
+                                                abs(v[1][ii] - v[0][ii]),
+                                                abs(v[2][ii] - v[0][ii]),
+                                            ]
+                                        ),
+                                        fmt=".",
+                                        color=c,
+                                        label=lab,
+                                        elinewidth=0.5,
+                                        capsize=2,
+                                    )
+                                else:
+                                    ax1.errorbar(
+                                        run_numbers_list[ii],
+                                        v[0][ii],
+                                        yerr=np.array(
+                                            [
+                                                abs(v[1][ii] - v[0][ii]),
+                                                abs(v[2][ii] - v[0][ii]),
+                                            ]
+                                        ),
+                                        fmt=".",
+                                        color=c,
+                                        elinewidth=0.5,
+                                        capsize=2,
+                                    )
+                    ax1.legend(
+                        fontsize="x-small",
+                        loc="upper left",
+                        bbox_to_anchor=(0, 1.2),
+                    )
+                    ax1.ticklabel_format(
+                        style="plain", axis="x", useOffset=False
+                    )
+                    ax1.spines.right.set_visible(False)
+                else:
+                    if self.get_instrument() != "DEMAND":
+                        for val, lab, c in zip(
+                            gonio_values, gonio_names, colors
+                        ):
+                            ax1.plot(run_numbers_list, val, ".", color=c)
+                    else:
+                        for val, lab, c in zip(
+                            gonio_values, gonio_names, colors
+                        ):
+                            v = val[:]
+                            for ii in range(len(run_numbers_list)):
+                                ax1.errorbar(
+                                    run_numbers_list[ii],
+                                    v[0][ii],
+                                    yerr=np.array(
+                                        [
+                                            abs(v[1][ii] - v[0][ii]),
+                                            abs(v[2][ii] - v[0][ii]),
+                                        ]
+                                    ),
+                                    fmt=".",
+                                    color=c,
+                                    elinewidth=0.5,
+                                    capsize=2,
+                                )
+                    ax1.ticklabel_format(
+                        style="plain", axis="x", useOffset=False
+                    )
+                    ax1.spines.left.set_visible(False)
+                    ax1.tick_params(labelleft=False)
+                    if i != len(subplot_limits) - 1:
+                        ax1.spines.right.set_visible(False)
+                        ax1.tick_params(labelright=False)
+                        ax1.tick_params(axis="y", length=0)
+                    else:
+                        ax1.spines.right.set_visible(False)
+                        ax1.tick_params(axis="y", length=0)
+
+                ax2 = ax1.twinx()
+                color = "r"
+                ax2.plot(run_numbers_list, scale_values, ".", color=color)
+                ax2.tick_params(axis="y", labelcolor=color)
+                ax2.set_ylim(
+                    -0.1 * np.max(scale_values), np.max(scale_values) * 1.1
+                )
+                if i < len(subplot_limits) - 1:
+                    ax2.spines.right.set_visible(False)
+                    ax2.spines.left.set_visible(False)
+                    ax2.tick_params(labelright=False)
+                    ax2.tick_params(labelleft=False)
+                    ax2.tick_params(axis="y", length=0)
+                else:
+                    ax2.tick_params(labelright=True)
+                    ax2.spines.left.set_visible(False)
+                    ax2.tick_params(labelleft=False)
+                    ax2.tick_params(axis="y", color=color, labelright=True)
+                    ax2.set_ylabel(
+                        f'Scale ({inst_params["Scale"].split(".")[-1]})',
+                        color=color,
+                    )
+
+        self.plot.figure.canvas.draw()
+
+    def clear_ipts(self):
+        """Clear the IPTS combo box."""
+        self.ipts_field.clear()
+
+    def add_ipts_items(self, items):
+        """Add items to the IPTS combo box."""
+        if items:
+            self.ipts_field.addItems(items)
+
+    def set_experiment_enabled(self, enabled: bool):
+        """Enable or disable the experiment combo box."""
+        self.exp_cbox.setEnabled(enabled)
+
+    def set_runs_label(self, text: str):
+        """Set the runs label text."""
+        self.runs_label.setText(text)
+
+    def show_message(self, text: str, color: str = "red"):
+        """Set the message label text and colour."""
+        self.message_label.setText(text)
+        self.message_label.setStyleSheet(f"color: {color};")
+
+    def add_name_items(self, items):
+        """Add names to the selection list."""
+        if items:
+            self.name_list.addItems(items)
+
+    def clear_name_list(self):
+        """Clear the name selection list."""
+        self.name_list.clear()
+
+    def clear_experiments(self):
+        """Clear the experiments combo box."""
+        self.exp_cbox.clear()
+
+    def set_experiment_current(self, text: str):
+        """Set the current experiment text."""
+        self.exp_cbox.setCurrentText(text)
+
+    def set_runs_text(self, text: str):
+        """Set the runs list text."""
+        self.runs_list.setText(text)
+
+    def get_credentials(self):
+        """Return (username, password) from the UI fields."""
+        return self.user_line.text(), self.pass_line.text()
+
+    def clear_password(self):
+        """Clear the password field in the UI."""
+        self.pass_line.setText("")
+
 
 class Presenter:
     def __init__(self, view, model):
@@ -158,24 +434,23 @@ class Presenter:
 
     def switch_instrument(self):
         instrument = self.view.get_instrument()
-        self.view.ipts_field.clear()
+        self.view.clear_ipts()
         self.clear()
 
         if instrument == "DEMAND":
-            self.view.exp_cbox.setEnabled(True)
-            self.view.runs_label.setText("Scan Numbers:")
+            self.view.set_experiment_enabled(True)
+            self.view.set_runs_label("Scan Numbers:")
         else:
-            self.view.exp_cbox.setEnabled(False)
-            self.view.runs_label.setText("Run Numbers: ")
+            self.view.set_experiment_enabled(False)
+            self.view.set_runs_label("Run Numbers: ")
 
         inst_params = self.model.beamline_info(instrument)
 
         try:
             available_runs = self.model.list_available(self.login, inst_params)
-            self.view.ipts_field.addItems(available_runs)
+            self.view.add_ipts_items(available_runs)
         except AttributeError:
-            self.view.message_label.setText("Not Signed In")
-            self.view.message_label.setStyleSheet("color: red;")
+            self.view.show_message("Not Signed In", color="red")
 
         self.inst_params = inst_params
 
@@ -186,21 +461,20 @@ class Presenter:
             self.data_files = self.model.retrieve_data_files(
                 self.login, self.inst_params, ipts
             )
+            # model populates the experiments combo-box as before
             self.model.set_experiments(self.view.exp_cbox, self.data_files)
             self.names = self.model.run_title_dictionary(
                 self.data_files, self.inst_params
             )
             if self.view.get_instrument() != "DEMAND":
-                self.view.name_list.addItems(list(self.names.keys()))
+                self.view.add_name_items(list(self.names.keys()))
             else:
                 self.set_exp()
 
         except AttributeError:
-            self.view.message_label.setText("Not Signed In")
-            self.view.message_label.setStyleSheet("color: red;")
+            self.view.show_message("Not Signed In", color="red")
         except pyoncat.InvalidRefreshTokenError:
-            self.view.message_label.setText("Login Expired")
-            self.view.message_label.setStyleSheet("color: orange;")
+            self.view.show_message("Login Expired", color="orange")
 
     def refresh(self):
         self.set_ipts()
@@ -214,10 +488,9 @@ class Presenter:
 
         self.clear()
         self.model.set_experiments(self.view.exp_cbox, self.data_files)
-        self.view.exp_cbox.setCurrentText(exp)
+        self.view.set_experiment_current(exp)
 
         mask = np.array([f"exp{exp}" in df["id"] for df in data_files])
-
         dfs = np.array(data_files)[mask]
         self.data_files = list(dfs)
 
@@ -225,7 +498,7 @@ class Presenter:
             self.data_files, self.inst_params
         )
 
-        self.view.name_list.addItems(list(self.names.keys()))
+        self.view.add_name_items(list(self.names.keys()))
 
     def select_name(self):
         names = self.view.get_name()
@@ -277,11 +550,7 @@ class Presenter:
             self.data_files, runs_list, self.inst_params
         )
 
-        if len(run_numbers_list) == 0:
-            pass
-            # self.view.plot.figure.clf()
-            # self.view.plot.figure.canvas.draw()
-        else:
+        if len(run_numbers_list) > 0:
             gonio_values, gonio_names = self.model.goniometer_values(
                 self.data_files, data_indices, self.inst_params
             )
@@ -301,292 +570,48 @@ class Presenter:
         self.view.plot.figure.canvas.draw()
 
     def plot(self, gonio_values, gonio_names, run_numbers_list, scale_values):
-        self.view.plot.figure.clf()
-        self.view.plot.figure.canvas.draw()
-        if self.view.get_ipts() == "":
-            return
+        subplot_limits = getattr(self.model, "subplot_limits", [])
+        inst_params = getattr(self, "inst_params", {})
 
-        self.view.plot.figure.subplots_adjust(wspace=0.1, top=0.85, bottom=0.1)
-        colors = ["C0", "C1", "C2", "C4"]
-
-        if len(self.model.subplot_limits) == 1:
-            ax1 = self.view.plot.figure.subplots()
-            if self.view.get_instrument() != "DEMAND":
-                for val, lab, c in zip(gonio_values, gonio_names, colors):
-                    ax1.plot(run_numbers_list, val, ".", color=c, label=lab)
-            else:
-                for val, lab, c in zip(gonio_values, gonio_names, colors):
-                    v = val[:]
-                    for ii in range(len(run_numbers_list)):
-                        if ii == 0:
-                            ax1.errorbar(
-                                run_numbers_list[ii],
-                                v[0][ii],
-                                yerr=np.array(
-                                    [
-                                        abs(v[1][ii] - v[0][ii]),
-                                        abs(v[2][ii] - v[0][ii]),
-                                    ]
-                                ),
-                                fmt=".",
-                                color=c,
-                                label=lab,
-                                elinewidth=0.5,
-                                capsize=2,
-                            )
-                        else:
-                            ax1.errorbar(
-                                run_numbers_list[ii],
-                                v[0][ii],
-                                yerr=np.array(
-                                    [
-                                        abs(v[1][ii] - v[0][ii]),
-                                        abs(v[2][ii] - v[0][ii]),
-                                    ]
-                                ),
-                                fmt=".",
-                                color=c,
-                                elinewidth=0.5,
-                                capsize=2,
-                            )
-
-            ax1.set_ylabel("Goniometer Values (degrees)")
-            if self.view.get_instrument() != "DEMAND":
-                ax1.set_xlabel("Run Number")
-            else:
-                ax1.set_xlabel("Scan Number")
-                ax1.set_title(f"exp{self.view.get_experiment()}")
-            ax1.set_xlim(
-                self.model.subplot_limits[0][0] - 1,
-                self.model.subplot_limits[0][1] + 1,
-            )
-            ax1.legend(
-                fontsize="x-small", loc="upper left", bbox_to_anchor=(0, 1.2)
-            )
-            ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
-            ax1.ticklabel_format(style="plain", axis="x", useOffset=False)
-
-            ax2 = ax1.twinx()
-            color = "r"
-            ax2.set_ylabel(
-                f'Scale ({self.inst_params["Scale"].split(".")[-1]})',
-                color=color,
-            )
-            ax2.plot(run_numbers_list, scale_values, ".", color=color)
-            ax2.tick_params(axis="y", labelcolor=color)
-            ax2.set_ylim(
-                -0.1 * np.max(scale_values), np.max(scale_values) * 1.1
-            )
-
-        else:
-            axs = self.view.plot.figure.subplots(
-                1,
-                len(self.model.subplot_limits),
-                sharey=True,
-                width_ratios=[
-                    l[1] - l[0] + 2 for l in self.model.subplot_limits
-                ],
-            )
-
-            if self.view.get_instrument() != "DEMAND":
-                self.view.plot.figure.supxlabel(
-                    "Run Number", fontsize="medium"
-                )
-            else:
-                self.view.plot.figure.supxlabel(
-                    "Scan Number", fontsize="medium"
-                )
-                self.view.plot.figure.suptitle(
-                    f"exp{self.view.get_experiment()}", fontsize="medium"
-                )
-            spacing = len(run_numbers_list) // 6 + 1
-
-            d = 0.5
-            kwargs = dict(
-                marker=[(-d, -1), (d, 1)],
-                markersize=12,
-                linestyle="none",
-                color="k",
-                mec="k",
-                mew=1,
-                clip_on=False,
-            )
-
-            for i, ax in enumerate(axs):
-                lim = self.model.subplot_limits[i]
-                lim_range = 1  # (lim[1]-lim[0] + 1)*0.2
-                ax.set_xlim(lim[0] - lim_range, lim[1] + lim_range)
-                ax.set_ylim(
-                    np.min(gonio_values) - 10, np.max(gonio_values) + 10
-                )
-                if lim[0] != lim[1]:
-                    xt = np.arange(lim[0], lim[1] + 1)
-                    mask = xt % spacing == 0
-                    if len(xt[mask]) == 0:
-                        ax.set_xticks([lim[0]])
-                    else:
-                        ax.set_xticks(xt[mask])
-                else:
-                    ax.set_xticks([lim[0]])
-                # ax.set_aspect(0.5)
-                # ax.tick_params(axis='x',labelrotation=15)
-
-                if i == 0:
-                    ax.set_ylabel("Goniometer Values (degrees)")
-                    if self.view.get_instrument() != "DEMAND":
-                        for val, lab, c in zip(
-                            gonio_values, gonio_names, colors
-                        ):
-                            ax.plot(
-                                run_numbers_list, val, ".", color=c, label=lab
-                            )
-                    else:
-                        for val, lab, c in zip(
-                            gonio_values, gonio_names, colors
-                        ):
-                            v = val[:]
-                            for ii in range(len(run_numbers_list)):
-                                if ii == 0:
-                                    ax.errorbar(
-                                        run_numbers_list[ii],
-                                        v[0][ii],
-                                        yerr=np.array(
-                                            [
-                                                abs(v[1][ii] - v[0][ii]),
-                                                abs(v[2][ii] - v[0][ii]),
-                                            ]
-                                        ),
-                                        fmt=".",
-                                        color=c,
-                                        label=lab,
-                                        elinewidth=0.5,
-                                        capsize=2,
-                                    )
-                                else:
-                                    ax.errorbar(
-                                        run_numbers_list[ii],
-                                        v[0][ii],
-                                        yerr=np.array(
-                                            [
-                                                abs(v[1][ii] - v[0][ii]),
-                                                abs(v[2][ii] - v[0][ii]),
-                                            ]
-                                        ),
-                                        fmt=".",
-                                        color=c,
-                                        elinewidth=0.5,
-                                        capsize=2,
-                                    )
-                    ax.legend(
-                        fontsize="x-small",
-                        loc="upper left",
-                        bbox_to_anchor=(0, 1.2),
-                    )
-                    # ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-                    ax.ticklabel_format(
-                        style="plain", axis="x", useOffset=False
-                    )
-                    ax.spines.right.set_visible(False)
-                    ax.plot([1, 1], [0, 1], transform=ax.transAxes, **kwargs)
-                else:
-                    if self.view.get_instrument() != "DEMAND":
-                        for val, lab, c in zip(
-                            gonio_values, gonio_names, colors
-                        ):
-                            ax.plot(run_numbers_list, val, ".", color=c)
-                    else:
-                        for val, lab, c in zip(
-                            gonio_values, gonio_names, colors
-                        ):
-                            v = val[:]
-                            for ii in range(len(run_numbers_list)):
-                                if ii == 0:
-                                    ax.errorbar(
-                                        run_numbers_list[ii],
-                                        v[0][ii],
-                                        yerr=np.array(
-                                            [
-                                                abs(v[1][ii] - v[0][ii]),
-                                                abs(v[2][ii] - v[0][i]),
-                                            ]
-                                        ),
-                                        fmt=".",
-                                        color=c,
-                                        label=lab,
-                                        elinewidth=0.5,
-                                        capsize=2,
-                                    )
-                                else:
-                                    ax.errorbar(
-                                        run_numbers_list[ii],
-                                        v[0][ii],
-                                        yerr=np.array(
-                                            [
-                                                abs(v[1][ii] - v[0][ii]),
-                                                abs(v[2][ii] - v[0][ii]),
-                                            ]
-                                        ),
-                                        fmt=".",
-                                        color=c,
-                                        elinewidth=0.5,
-                                        capsize=2,
-                                    )
-
-                    # ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-                    ax.ticklabel_format(
-                        style="plain", axis="x", useOffset=False
-                    )
-                    ax.spines.left.set_visible(False)
-                    ax.tick_params(labelleft=False)
-                    # ax.set_yticks([])
-                    if i != len(self.model.subplot_limits) - 1:
-                        ax.spines.right.set_visible(False)
-                        ax.tick_params(labelright=False)
-                        ax.tick_params(axis="y", length=0)
-                        ax.plot(
-                            [0, 0, 1, 1],
-                            [0, 1, 0, 1],
-                            transform=ax.transAxes,
-                            **kwargs,
-                        )
-                    else:
-                        ax.spines.right.set_visible(False)
-                        ax.tick_params(axis="y", length=0)
-                        # ax.yaxis.tick_right()
-                        ax.plot(
-                            [0, 0], [0, 1], transform=ax.transAxes, **kwargs
-                        )
-
-                ax2 = ax.twinx()
-                color = "r"
-                ax2.plot(run_numbers_list, scale_values, ".", color=color)
-                ax2.tick_params(axis="y", labelcolor=color)
-                ax2.set_ylim(
-                    -0.1 * np.max(scale_values), np.max(scale_values) * 1.1
-                )
-                if i < len(self.model.subplot_limits) - 1:
-                    ax2.spines.right.set_visible(False)
-                    ax2.spines.left.set_visible(False)
-                    ax2.tick_params(labelright=False)
-                    ax2.tick_params(labelleft=False)
-                    ax2.tick_params(axis="y", length=0)
-                else:
-                    ax2.tick_params(labelright=True)
-                    ax2.spines.left.set_visible(False)
-                    ax2.tick_params(labelleft=False)
-                    ax2.tick_params(axis="y", color=color, labelright=True)
-                    # ax2.spines.right.set_color(color)
-                    ax2.set_ylabel(
-                        f'Scale ({self.inst_params["Scale"].split(".")[-1]})',
-                        color=color,
-                    )
-
-        self.view.plot.figure.canvas.draw()
+        self.view.plot_goniometer(
+            gonio_values,
+            gonio_names,
+            run_numbers_list,
+            scale_values,
+            subplot_limits,
+            inst_params,
+        )
 
     def sign_in(self):
-        user = self.view.user_line.text()
-        pw = self.view.pass_line.text()
+        user, pw = self.view.get_credentials()
 
+        try:
+            oncat = self.model.login_oncat(user, pw)
+        except pyoncat.InvalidRefreshTokenError:
+            self.view.show_message("Login Expired", color="orange")
+            self.view.clear_password()
+            return
+        except Exception:
+            self.view.show_message(
+                "Incorrect Username or Password", color="red"
+            )
+            self.view.clear_password()
+            return
+
+        self.login = oncat
+        self.view.show_message("Signed In", color="green")
+        self.view.clear_password()
+        self.switch_instrument()
+
+
+class Model:
+    def __init__(self):
+        pass
+
+    def login_oncat(self, user: str, password: str):
+        """
+        Create an ONCat client and perform login.
+        """
         ONCAT_URL = "https://oncat.ornl.gov"
         CLIENT_ID = "99025bb3-ce06-4f4b-bcf2-36ebf925cd1d"
 
@@ -596,25 +621,8 @@ class Presenter:
             flow=pyoncat.RESOURCE_OWNER_CREDENTIALS_FLOW,
         )
 
-        try:
-            oncat.login(user, pw)
-        except:
-            self.view.message_label.setText("Incorrect Username or Password")
-            self.view.message_label.setStyleSheet("color: red;")
-            self.view.pass_line.setText("")
-            return
-
-        self.login = oncat
-        self.view.message_label.setText("Signed In")
-        self.view.message_label.setStyleSheet("color: green;")
-        # self.view.user_line.setText('')
-        # self.view.pass_line.setText('')
-        self.switch_instrument()
-
-
-class Model:
-    def __init__(self):
-        pass
+        oncat.login(user, password)
+        return oncat
 
     def goniometer_entries(self, inst_params):
         goniometer = inst_params["Goniometer"]
