@@ -36,7 +36,7 @@ from matplotlib.ticker import MaxNLocator
 import pyoncat
 
 directory = os.path.dirname(os.path.realpath(__file__))
-directory = os.path.abspath(os.path.join(directory, ".."))
+directory = os.path.abspath(os.path.join(directory, "../.."))
 sys.path.append(directory)
 
 from garnet.config.instruments import beamlines
