@@ -2374,8 +2374,7 @@ class FormModel:
 
     def set_instrument(self, instrument):
         self.beamline = beamlines[instrument]
-        if self.reduction.plan is None:
-            self.reduction.generate_plan(instrument)
+        self.reduction.generate_plan(instrument)
 
     def get_processes(self):
         return self.beamline["Processes"]
