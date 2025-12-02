@@ -147,19 +147,19 @@ class Integration(SubPlan):
         if mtd.doesExist("combine"):
             peaks.save_peaks(result_file, "combine")
 
-            peaks.create_peaks("combine", "merge", lean=True)
+            # peaks.create_peaks("combine", "merge", lean=True)
 
-            peak_dict = self.extract_merge_peak_info("combine")
+            # peak_dict = self.extract_merge_peak_info("combine")
 
-            self.n_proc = self.plan["NProc"]
+            # self.n_proc = self.plan["NProc"]
 
-            results = self.integrate_merge(peak_dict)
+            # results = self.integrate_merge(peak_dict)
 
-            self.update_merge_info("merge", results)
+            # self.update_merge_info("merge", results)
 
-            pk_file = self.get_diagnostic_file("merge")
+            # pk_file = self.get_diagnostic_file("merge")
 
-            peaks.save_peaks(pk_file, "merge")
+            # peaks.save_peaks(pk_file, "merge")
 
             opt = Optimization("combine")
             opt.optimize_lattice(self.params["Cell"])
@@ -353,7 +353,7 @@ class Integration(SubPlan):
 
             data.delete_workspace("md")
 
-        peaks.remove_weak_peaks("combine")
+        peaks.remove_weak_peaks("combine", -100)
 
         peaks.save_peaks(result_file, "combine")
 
@@ -784,6 +784,7 @@ class Integration(SubPlan):
             intensity = ellipsoid.intensity
             sigma = ellipsoid.sigma
             peak_background_mask = ellipsoid.peak_background_mask
+            integral = ellipsoid.integral
 
         if self.make_plot and params is not None:
             self.peak_plot.add_ellipsoid_fit(best_fit)
@@ -803,6 +804,8 @@ class Integration(SubPlan):
             self.peak_plot.add_peak_stats(redchi2, intensity, sigma)
 
             self.peak_plot.add_data_norm_fit(*data_norm_fit)
+
+            self.peak_plot.add_integral_fit(integral)
 
             try:
                 self.peak_plot.save_plot(peak_file)
@@ -932,6 +935,7 @@ class Integration(SubPlan):
             intensity = ellipsoid.intensity
             sigma = ellipsoid.sigma
             peak_background_mask = ellipsoid.peak_background_mask
+            integral = ellipsoid.integral
 
         if self.make_plot and params is not None:
             self.peak_plot.add_ellipsoid_fit(best_fit)
@@ -951,6 +955,8 @@ class Integration(SubPlan):
             self.peak_plot.add_peak_stats(redchi2, intensity, sigma)
 
             self.peak_plot.add_data_norm_fit(*data_norm_fit)
+
+            self.peak_plot.add_integral_fit(integral)
 
             try:
                 self.peak_plot.save_plot(peak_file)
@@ -3559,7 +3565,7 @@ class PeakEllipsoid:
         ratio = vol_pk / vol_bkg if vol_bkg > 0 else 0
 
         intens = pk_intens - ratio * bkg_intens
-        sig = np.sqrt(pk_err + ratio**2 * bkg_err**2)
+        sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2)
 
         if not sig > 0:
             sig = float("inf")
@@ -3567,16 +3573,16 @@ class PeakEllipsoid:
         return intens, sig
 
     def extract_intensity(self, d, n, pk, bkg, kernel):
-        d_pk = d[pk].copy()
-        n_pk = n[pk].copy()
-
-        d_bkg = d[bkg].copy()
-        n_bkg = n[bkg].copy()
-
         core = pk & (n > 0)
         shell = bkg & (n > 0)
 
-        frac = np.nansum(kernel[core]) / np.nansum(kernel[pk])
+        d_pk = d[core].copy()
+        n_pk = n[core].copy()
+
+        d_bkg = d[shell].copy()
+        n_bkg = n[shell].copy()
+
+        # frac = np.nansum(kernel[core]) / np.nansum(kernel[pk])
 
         bkg_cnts = np.nansum(d_bkg)
         bkg_norm = np.nansum(n_bkg)
@@ -3602,35 +3608,165 @@ class PeakEllipsoid:
         if pk_cnts == 0.0:
             pk_norm = float("nan")
 
-        y_pk = d_pk / n_pk
-        e_pk = np.sqrt(d_pk + (n_pk > 0)) / n_pk
+        vol_pk = float(core.sum())
+        vol_bkg = float(shell.sum())
 
-        y_bkg = d_bkg / n_bkg
-        e_bkg = np.sqrt(d_bkg + (n_bkg > 0)) / n_bkg
-
-        y_bkg[~np.isfinite(y_bkg)] = np.nan
-        e_bkg[~np.isfinite(e_bkg)] = np.nan
-
-        pk_intens = np.nansum(y_pk)
-        pk_err = np.sqrt(np.nansum(e_pk**2))
-
-        bkg_intens = np.nansum(y_bkg)
-        bkg_err = np.sqrt(np.nansum(e_bkg**2))
-
-        vol_pk = core.sum()
-        vol_bkg = shell.sum()
+        vol = int(core.sum())
 
         ratio = vol_pk / vol_bkg if vol_bkg > 0 else 0
 
-        intens = pk_intens - ratio * bkg_intens  # / frac
-        sig = np.sqrt(pk_err + ratio**2 * bkg_err**2)  # / frac
+        # pk_intens = vol_pk * pk_cnts / pk_norm
+        # bkg_intens = vol_bkg * bkg_cnts / bkg_norm
+
+        # pk_err = vol_pk * np.sqrt(pk_cnts) / pk_norm
+        # bkg_err = vol_bkg * np.sqrt(bkg_cnts) / bkg_norm
+
+        # intens = pk_intens - ratio * bkg_intens  # / frac
+        # sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2)  # / frac
+
+        pk_intens = pk_cnts
+        bkg_intens = bkg_cnts
+
+        pk_err = np.sqrt(pk_cnts)
+        bkg_err = np.sqrt(bkg_cnts)
+
+        raw_intens = pk_intens - ratio * bkg_intens
+        raw_sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2)
+
+        intens = vol * raw_intens / pk_norm
+        sig = vol * raw_sig / pk_norm
+
+        # pk_intens = np.nansum(d_pk / n_pk)
+        # bkg_intens = np.nansum(d_bkg / n_bkg)
+
+        # pk_err = np.sqrt(np.nansum(d_pk / n_pk**2))
+        # bkg_err = np.sqrt(np.nansum(d_bkg / n_bkg**2))
+
+        # intens = pk_intens - ratio * bkg_intens # / frac
+        # sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2) # / frac
 
         if not sig > 0:
-            sig = float("inf")
+            sig = float("-inf")
 
-        N = y_pk.size
+        return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
-        return intens, sig, b, b_err, N, pk_cnts, pk_norm, bkg_cnts, bkg_norm
+    def spherical_intensitiy(self, x0, x1, x2, d, n, c, S):
+        scale = np.sqrt(scipy.stats.chi2.ppf(0.997, df=3))
+        C = S / scale**2
+
+        e = np.sqrt(d) / n
+
+        mask = np.isfinite(e) & (e > 0)
+
+        c0, c1, c2 = c
+
+        x = np.array([x0 - c0, x1 - c1, x2 - c2])
+
+        C_inv = np.linalg.inv(C)
+
+        r = np.sqrt(np.einsum("ij,jklm,iklm->klm", C_inv, x, x))
+
+        R = np.histogram_bin_edges(r[mask], bins="auto")
+
+        D, _ = np.histogram(r[mask], bins=R, weights=d[mask], density=False)
+        N, _ = np.histogram(r[mask], bins=R, weights=n[mask], density=False)
+
+        R = 0.5 * (R[1:] + R[:-1])
+
+        Y = D / N
+        E = np.sqrt(D) / N
+
+        mask = np.isfinite(E) & (E > 0)
+
+        norm = np.sqrt(np.linalg.det(2 * np.pi * C))
+
+        K = np.exp(-0.5 * R**2) / norm
+
+        dR = np.diff(R).mean()
+
+        pk = R / scale <= 1
+        bkg = R / scale > 1
+
+        b = np.nanmean(Y[bkg])
+        b_err = np.sqrt(np.nanmean(E[bkg] ** 2))
+
+        I = np.nansum(Y[pk] - b) * dR * norm
+        I_err = np.nansum(E[pk] ** 2 + b_err**2) * dR * norm
+
+        return I, I_err, b, b_err, R / scale, I * K + b, Y, E
+
+    #     x0 = [np.max(Y[mask]), np.median(Y[mask])]
+
+    #     sol = scipy.optimize.least_squares(
+    #         self.whiten_residuals,
+    #         x0,
+    #         args=(K[mask], Y[mask], E[mask] * 0 +1),
+    #         loss='soft_l1',
+    #     )
+
+    #     A, b = sol.x
+
+    #     J = sol.jac
+    #     inv_cov = J.T.dot(J)
+    #     if np.linalg.det(inv_cov) > 0:
+    #         cov = np.linalg.inv(inv_cov)
+    #     else:
+    #         cov = np.diag(sol.x)
+
+    #     chi2dof = np.sum(sol.fun**2)/(sol.fun.size-sol.x.size)
+    #     cov *= chi2dof
+
+    #     A_err, b_err = np.sqrt(np.diag(cov))
+
+    #     return A, A_err, b, b_err, R, A * K + b, Y, E
+
+    # def whiten_model(self, x, k):
+    #     A, b = x
+    #     return A * k + b
+
+    # def whiten_residuals(self, x, k, y, e):
+    #     return (self.whiten_model(x, k) - y) / e
+
+    # def whitened_intensitiy(self, x0, x1, x2, d, n, c, S):
+    #     scale = np.sqrt(scipy.stats.chi2.ppf(0.997, df=3))
+
+    #     V, R = np.linalg.eigh(S)
+    #     W = (R @ np.diag(scale / np.sqrt(V)) @ R.T)
+
+    #     c0, c1, c2 = c
+
+    #     mu = [x0 - c0, x1 - c1, x2 - c2]
+    #     r = np.linalg.norm(np.einsum('i...,ij->j...', mu, W.T), axis=0)
+
+    #     y = d / n
+    #     e = np.sqrt(d) / n
+
+    #     mask = np.isfinite(e) & (e > 0)
+
+    #     K = np.exp(-0.5 * r[mask]**2)
+
+    #     X = np.column_stack([K, np.ones_like(K)])
+
+    #     w = 1 / e[mask]
+    #     Xw = X * w[:, None]
+
+    #     I = y[mask]
+    #     Iw = I * w
+
+    #     p, residuals, rank, s = np.linalg.lstsq(Xw, Iw, rcond=None)
+    #     A, b = p
+
+    #     N, n = X.shape
+    #     res = Xw @ p - I
+    #     chi2 = np.sum(res**2)
+    #     s2 = chi2 / (N - n)
+
+    #     XtX = Xw.T @ Xw
+    #     cov = s2 * np.linalg.inv(XtX)
+
+    #     A_err, b_err = np.sqrt(np.diag(cov))
+
+    #     return A, A_err, b, b_err, r[mask], A * K + b, y[mask], e[mask]
 
     def integrate(self, x0, x1, x2, d, n, val_mask, det_mask, c, S):
         dx0, dx1, dx2 = self.voxels(x0, x1, x2)
@@ -3657,14 +3793,9 @@ class PeakEllipsoid:
         self.info = [d3x, b, b_err]
 
         y = d / n
-        e = np.sqrt(d + (n > 0)) / n
+        e = np.sqrt(d) / n
 
         intens_raw, sig_raw = self.extract_raw_intensity(d, pk, bkg)
-
-        signal_to_noise = intens_raw / sig_raw
-
-        # sig = 1 / signal_to_noise * intens
-        # intens = signal_to_noise**2 / (signal_to_noise**2 + 4) * intens
 
         self.info += [intens_raw, sig_raw]
 
@@ -3680,5 +3811,14 @@ class PeakEllipsoid:
         self.data_norm_fit = xye, params
 
         self.peak_background_mask = x0, x1, x2, pk, bkg
+
+        result = self.spherical_intensitiy(x0, x1, x2, d, n, c, S)
+
+        I, I_err, b, b_err, r, y_fit, y, e = result
+
+        self.integral = r, y_fit, y, e
+
+        self.intensity.append(I)
+        self.sigma.append(I_err)
 
         return intens, sig

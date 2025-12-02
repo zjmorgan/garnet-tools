@@ -173,7 +173,7 @@ class PeakPlot(BasePlot):
 
         self.fig = plt.figure(figsize=(6.4 * 2, 4.8 * 2), layout="constrained")
 
-        sp = GridSpec(2, 2, figure=self.fig)
+        sp = GridSpec(3, 2, figure=self.fig)
 
         self.gs = []
 
@@ -188,11 +188,11 @@ class PeakPlot(BasePlot):
         self.gs.append(gs)
 
         gs = GridSpecFromSubplotSpec(
-            4,
             3,
-            height_ratios=[1, 1, 1, 1],
+            3,
+            height_ratios=[1, 1, 1],
             width_ratios=[1, 1, 1],
-            subplot_spec=sp[:, 0],
+            subplot_spec=sp[:2, 0],
         )
 
         self.gs.append(gs)
@@ -207,10 +207,27 @@ class PeakPlot(BasePlot):
 
         self.gs.append(gs)
 
+        gs = GridSpecFromSubplotSpec(
+            1,
+            3,
+            height_ratios=[1],
+            width_ratios=[1, 1, 1],
+            subplot_spec=sp[2, 0],
+        )
+
+        self.gs.append(gs)
+
+        gs = GridSpecFromSubplotSpec(
+            1, 1, height_ratios=[1], width_ratios=[1], subplot_spec=sp[2, 1]
+        )
+
+        self.gs.append(gs)
+
         self.__init_ellipsoid()
         self.__init_profile()
         self.__init_projection()
         self.__init_norm()
+        self.__init_int()
 
     def __init_ellipsoid(self):
         self.ellip = []
@@ -397,6 +414,29 @@ class PeakPlot(BasePlot):
         self.cb_el.ax.minorticks_on()
         # self.cb_el.formatter.set_powerlimits((0, 0))
         # self.cb_el.formatter.set_useMathText(True)
+
+    def __init_int(self):
+        self.int_error = []
+        self.int_line = []
+
+        gs = self.gs[4]
+
+        ax = self.fig.add_subplot(gs[0, 0])
+
+        ax.minorticks_on()
+        ax.set_xlabel(r"$r$")
+
+        x = np.arange(10) - 5
+        y = -2 * x**2 + 50
+        e = np.sqrt(np.abs(y))
+
+        self.int = ax
+
+        error_cont = ax.errorbar(x, y, e, fmt=".", color="C0", zorder=1)
+        plot_line = ax.step(x, y, where="mid", color="C1", zorder=0)
+
+        self.int_error.append(error_cont)
+        self.int_line.append(plot_line)
 
     def __init_profile(self):
         self.prof = []
@@ -698,9 +738,9 @@ class PeakPlot(BasePlot):
         y = np.arange(6)
         z = y + y.size * x[:, np.newaxis]
 
-        gs = self.gs[1]
+        gs = self.gs[3]
 
-        ax = self.fig.add_subplot(gs[3, 0])
+        ax = self.fig.add_subplot(gs[0, 0])
 
         self.norm.append(ax)
 
@@ -726,7 +766,7 @@ class PeakPlot(BasePlot):
 
         ax.set_xlabel(r"$|Q|$ [$\AA^{-1}$]")
 
-        ax = self.fig.add_subplot(gs[3, 1])
+        ax = self.fig.add_subplot(gs[0, 1])
 
         self.norm.append(ax)
 
@@ -752,7 +792,7 @@ class PeakPlot(BasePlot):
 
         ax.set_xlabel(r"$|Q|$ [$\AA^{-1}$]")
 
-        ax = self.fig.add_subplot(gs[3, 2])
+        ax = self.fig.add_subplot(gs[0, 2])
 
         self.norm.append(ax)
 
@@ -787,6 +827,27 @@ class PeakPlot(BasePlot):
         self.cb_norm.ax.minorticks_on()
         # self.cb_norm.formatter.set_powerlimits((0, 0))
         # self.cb_norm.formatter.set_useMathText(True)
+
+    def add_integral_fit(self, xye_fit):
+        x, y_fit, y, e = xye_fit
+
+        lines, caps, bars = self.int_error[0]
+        lines.set_data(x, y)
+
+        (barsy,) = bars
+
+        yb, yt = y - e, y + e
+
+        n = len(x)
+
+        segments = [np.array([[x[i], yt[i]], [x[i], yb[i]]]) for i in range(n)]
+
+        barsy.set_segments(segments)
+
+        self.int_line[0][0].set_data(x, y_fit)
+
+        self.int.relim()
+        self.int.autoscale_view()
 
     def add_profile_fit(self, xye_fit):
         x, y_fit, y, e = xye_fit[0]
@@ -1554,3 +1615,11 @@ class PeakPlot(BasePlot):
         self.prof[2].set_ylabel(I_sig.format(intensity[1][2] / sigma[1][2]))
 
         self.cb_norm.ax.set_xlabel(I_sig.format(intensity[2] / sigma[2]))
+
+        label = r"$I={}$ | $I/\sigma={:.1f}$"
+
+        self.int.set_title(
+            label.format(
+                self._sci_notation(intensity[-1]), intensity[-1] / sigma[-1]
+            )
+        )

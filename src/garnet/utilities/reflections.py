@@ -184,10 +184,10 @@ class WobbleCorrection:
         x, y = np.array(x), np.array(y)
 
         x0 = [np.mean(y), 1.0, 1.0, 1.0]
-        bounds = [
-            (0, -np.inf, -np.inf, -np.inf),
-            (np.inf, np.inf, np.inf, np.inf),
-        ]
+        # bounds = [
+        #     (0, -np.inf, -np.inf, -np.inf),
+        #     (np.inf, np.inf, np.inf, np.inf),
+        # ]
 
         sol = scipy.optimize.basinhopping(
             self.cost_count_rate,
@@ -1350,7 +1350,7 @@ class Peaks:
             peak.setIntensity(scale * peak.getIntensity())
             peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
             if peak.getIntensity() > 10 * maximal:
-                peak.setSigmaIntensity(peak.getIntensity())
+                peak.setSigmaIntensity(float("-inf"))
             peak.setPeakNumber(peak.getRunNumber())
             peak.setBinCount(peak.getRunNumber())
             # peak.setRunNumber(1)
@@ -1470,11 +1470,11 @@ class Peaks:
         ax[2].minorticks_on()
         ax[3].minorticks_on()
         ax[4].minorticks_on()
-        ax[0].plot(Q0_mod, powder_err, ".", color="C0")
-        ax[1].plot(Q0_mod, peak_err[:, 0], ".", color="C1", rasterized=True)
-        ax[2].plot(Q0_mod, peak_err[:, 1], ".", color="C2", rasterized=True)
-        ax[3].plot(Q0_mod, peak_err[:, 2], ".", color="C3", rasterized=True)
-        ax[4].plot(Q0_mod, Q_vol, ".", color="C4", rasterized=True)
+        ax[0].plot(Q0_mod, powder_err, ",", color="C0", rasterized=True)
+        ax[1].plot(Q0_mod, peak_err[:, 0], ",", color="C1", rasterized=True)
+        ax[2].plot(Q0_mod, peak_err[:, 1], ",", color="C2", rasterized=True)
+        ax[3].plot(Q0_mod, peak_err[:, 2], ",", color="C3", rasterized=True)
+        ax[4].plot(Q0_mod, Q_vol, ",", color="C4", rasterized=True)
         ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
         ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
         ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
@@ -1503,7 +1503,7 @@ class Peaks:
             contamination = (peak_err[i] > peak_max) | (peak_err[i] < peak_min)
             background = Q_vol[i] > vol_cut
             if contamination.any() or powder.any() or background:
-                peak.setSigmaIntensity(peak.getIntensity())
+                peak.setSigmaIntensity(float("-inf"))
 
     def remove_non_integrated(self):
         for peak in mtd[self.peaks]:
@@ -1517,7 +1517,19 @@ class Peaks:
                 or shape["radius1"] == 0
                 or shape["radius2"] == 0
             ):
-                peak.setSigmaIntensity(peak.getIntensity())
+                peak.setSigmaIntensity(float("-inf"))
+
+    def remove_non_indexed(self, tol=0.1):
+        UB = mtd[self.peaks].sample().getOrientedLattice().getUB()
+        for peak in mtd[self.peaks]:
+            hkl = np.array(peak.getHKL())
+            Q = np.array(peak.getQSampleFrame())
+
+            Q0 = 2 * np.pi * UB @ hkl
+
+            diff = np.abs(Q / Q0 - 1).max()
+            if diff > tol:
+                peak.setSigmaIntensity(float("-inf"))
 
     def load_spectrum(self, filename, instrument):
         LoadIsawSpectrum(
@@ -1530,7 +1542,8 @@ class Peaks:
         LoadNexus(Filename=self.filename, OutputWorkspace=self.peaks)
 
         merge = self.filename.replace(".nxs", "_diagnostics/merge.nxs")
-        LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
+        if os.path.exists(merge):
+            LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
 
         shape_dict = {}
 
@@ -1588,9 +1601,27 @@ class Peaks:
         if os.path.exists(ub_file):
             LoadIsawUB(Filename=ub_file, InputWorkspace=self.peaks)
 
-        self.remove_edge_peaks()
-        self.remove_off_centered()
+        # self.remove_edge_peaks()
         self.remove_non_integrated()
+        self.remove_non_indexed()
+
+        FilterPeaks(
+            InputWorkspace=self.peaks,
+            OutputWorkspace=self.peaks,
+            FilterVariable="Signal/Noise",
+            FilterValue=-1,
+            Operator=">",
+        )
+
+        self.remove_off_centered()
+
+        FilterPeaks(
+            InputWorkspace=self.peaks,
+            OutputWorkspace=self.peaks,
+            FilterVariable="Signal/Noise",
+            FilterValue=-1,
+            Operator=">",
+        )
 
         run_info = mtd[self.peaks].run()
         run_keys = run_info.keys()
@@ -1600,6 +1631,7 @@ class Peaks:
 
         info_dict = {}
         norm_dict = {}
+        rate_dict = {}
 
         items = keys + vals
 
@@ -1615,6 +1647,8 @@ class Peaks:
             n = run_info.getLogData("peaks_n").value
             p = run_info.getLogData("peaks_p").value
             run = run_info.getLogData("peaks_run").value
+
+            cntrt = run_info.getLogData("peaks_cntrt").value
 
             N = run_info.getLogData("peaks_voxels").value
             vol = run_info.getLogData("peaks_vol").value
@@ -1639,10 +1673,51 @@ class Peaks:
                 info_dict[key] = vals
                 norm_dict[key] = (intens[i], sig[i])
 
+                rate_dict[run[i]] = cntrt[i]
+
         filename = os.path.splitext(self.filename)[0]
+
+        x, y = [], []
+
+        for key in rate_dict.keys():
+            x.append(key)
+            y.append(rate_dict[key])
+
+        fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
+        ax.set_xlabel("")
+        ax.plot(x, y, ".", rasterized=True)
+        ax.minorticks_on()
+        ax.set_ylabel("Count rate")
+        fig.savefig(filename + "_rate.pdf")
+
+        for peak in mtd[self.peaks]:
+            run = int(peak.getRunNumber())
+            scale = rate_dict[run]
+            peak.setIntensity(scale * peak.getIntensity())
+            peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         self.info_dict = info_dict
         self.norm_dict = norm_dict
+
+        # for peak in mtd[self.peaks]:
+        #     h, k, l = [int(val) for val in peak.getIntHKL()]
+        #     m, n, p = [int(val) for val in peak.getIntMNP()]
+
+        #     run = int(peak.getRunNumber())
+        #     key = (run, h, k, l, m, n, p)
+        #     items = self.info_dict.get(key)
+
+        #     if items is not None:
+        #         N, vol, pk_data, pk_norm, bkg_data, bkg_norm = items
+        #         intens, sig = norm_dict[key]
+
+        #         intens *= vol * N / pk_norm
+        #         sig *= vol * N / pk_norm
+
+        #         peak.setIntensity(intens)
+        #         peak.setSigmaIntensity(sig)
+
+        #         peak.setSigmaIntensity(peak.getIntensity() / intens * sig)
 
         x, y = [], []
 
@@ -1652,17 +1727,20 @@ class Peaks:
 
             run = int(peak.getRunNumber())
             key = (run, h, k, l, m, n, p)
-            N, vol, pk_data, pk_norm, bkg_data, bkg_norm = self.info_dict[key]
+            items = self.info_dict.get(key)
 
-            lamda = peak.getWavelength()
-            two_theta = peak.getScattering()
+            if items is not None:
+                N, vol, pk_data, pk_norm, bkg_data, bkg_norm = items
 
-            norm = np.log10(bkg_norm / pk_norm)
+                lamda = peak.getWavelength()
+                two_theta = peak.getScattering()
 
-            Q = 4 * np.pi / lamda * np.sin(0.5 * two_theta)
+                norm = np.log10(bkg_norm / pk_norm)
 
-            x.append(Q)
-            y.append(norm)
+                Q = 4 * np.pi / lamda * np.sin(0.5 * two_theta)
+
+                x.append(Q)
+                y.append(norm)
 
         filename = os.path.splitext(self.filename)[0]
 
@@ -1690,12 +1768,13 @@ class Peaks:
 
             run = int(peak.getRunNumber())
             key = (run, h, k, l, m, n, p)
-            N, vol, pk_data, pk_norm, bkg_data, bkg_norm = self.info_dict[key]
+            items = self.info_dict.get(key)
 
-            norm = np.log10(bkg_norm / pk_norm)
+            if items is not None:
+                norm = np.log10(bkg_norm / pk_norm)
 
-            if not np.isfinite(norm) or norm < ratio_min or norm > ratio_max:
-                peak.setSigmaIntensity(peak.getIntensity())
+                if norm < ratio_min or norm > ratio_max:
+                    peak.setSigmaIntensity(float("-inf"))
 
         lamda = np.array(mtd[self.peaks].column("Wavelength"))
 
@@ -1744,7 +1823,7 @@ class Peaks:
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
             FilterVariable="Signal/Noise",
-            FilterValue=3,
+            FilterValue=-1,
             Operator=">",
         )
 
@@ -1788,13 +1867,13 @@ class Peaks:
             if y[ind] == 0:
                 peak.setSigmaIntensity(peak.getIntensity())
 
-        FilterPeaks(
-            InputWorkspace=self.peaks,
-            OutputWorkspace=self.peaks,
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
+        # FilterPeaks(
+        #     InputWorkspace=self.peaks,
+        #     OutputWorkspace=self.peaks,
+        #     FilterVariable="Signal/Noise",
+        #     FilterValue=3,
+        #     Operator=">",
+        # )
 
         SolidAngle(InputWorkspace="sa", OutputWorkspace="solid_angle")
 
@@ -1889,13 +1968,13 @@ class Peaks:
 
         filename = os.path.splitext(self.filename)[0] + app + "_merge"
 
-        FilterPeaks(
-            InputWorkspace=peaks + "_merge",
-            OutputWorkspace=peaks + "_merge",
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
+        # FilterPeaks(
+        #     InputWorkspace=peaks + "_merge",
+        #     OutputWorkspace=peaks + "_merge",
+        #     FilterVariable="Signal/Noise",
+        #     FilterValue=3,
+        #     Operator=">",
+        # )
 
         for peak in mtd[peaks + "_merge"]:
             peak.setIntensity(self.scale * peak.getIntensity())
@@ -1979,15 +2058,16 @@ class Peaks:
 
         filename = os.path.splitext(self.filename)[0] + app
 
-        FilterPeaks(
-            InputWorkspace=peaks,
-            OutputWorkspace=peaks,
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
+        # FilterPeaks(
+        #     InputWorkspace=peaks,
+        #     OutputWorkspace=peaks,
+        #     FilterVariable="Signal/Noise",
+        #     FilterValue=3,
+        #     Operator=">",
+        # )
 
-        self.merge_intensities(name)
+        if mtd.doesExist(self.peaks + "_merge"):
+            self.merge_intensities(name)
 
         # for peak in mtd[peaks]:
         # I = peak.getIntensity()
@@ -2006,13 +2086,13 @@ class Peaks:
         # for i, peak in zip(indices.tolist(), mtd[peaks]):
         #    peak.setRunNumber(1)
 
-        FilterPeaks(
-            InputWorkspace=peaks,
-            OutputWorkspace=peaks,
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
+        # FilterPeaks(
+        #     InputWorkspace=peaks,
+        #     OutputWorkspace=peaks,
+        #     FilterVariable="Signal/Noise",
+        #     FilterValue=3,
+        #     Operator=">",
+        # )
 
         SortPeaksWorkspace(
             InputWorkspace=peaks,

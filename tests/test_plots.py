@@ -4,7 +4,7 @@ import numpy as np
 import scipy.linalg
 import scipy.spatial
 
-from garnet.reduction.integration import PeakSphere, PeakEllipsoid
+from garnet.reduction.integration import PeakEllipsoid
 from garnet.plots.peaks import PeakPlot
 from garnet.plots.volume import SlicePlot
 
@@ -126,7 +126,7 @@ def test_peak_plot():
 
     Q0 = np.array([Q0_x, Q0_y, Q0_z])
 
-    signal = np.random.multivariate_normal(Q0, cov, size=100000)
+    signal = np.random.multivariate_normal(Q0, cov, size=1000000)
 
     counts, bins = np.histogramdd(
         signal,
@@ -140,6 +140,13 @@ def test_peak_plot():
     Qx = 0.5 * (x_bin_edges[1:] + x_bin_edges[:-1])
     Qy = 0.5 * (y_bin_edges[1:] + y_bin_edges[:-1])
     Qz = 0.5 * (z_bin_edges[1:] + z_bin_edges[:-1])
+
+    print(
+        counts.sum()
+        * np.diff(Qx).mean()
+        * np.diff(Qy).mean()
+        * np.diff(Qz).mean()
+    )
 
     m = 1
 
@@ -166,14 +173,7 @@ def test_peak_plot():
 
     counts += b + a * (2 * np.random.random(counts.shape) - 1)
 
-    sig_data = np.sqrt(counts)
-    sig_data /= np.max(counts)
-
-    data_norm = counts.copy()
-    data_norm /= np.max(counts)
-
-    data_norm *= c
-    sig_data *= c
+    norm = np.full_like(counts, 5)
 
     Qx, Qy, Qz = np.meshgrid(Qx, Qy, Qz, indexing="ij")
 
@@ -181,7 +181,7 @@ def test_peak_plot():
 
     mask = counts > 0
 
-    ellipsoid.fit(Qx, Qy, Qz, data_norm, sig_data, counts, mask, mask, 0.1, 2)
+    ellipsoid.fit(Qx, Qy, Qz, counts, norm, counts, norm, mask, mask, 0.1, 2)
 
     c, S, *best_fit = ellipsoid.best_fit
 
@@ -195,11 +195,7 @@ def test_peak_plot():
 
     plot = PeakPlot()
 
-    norm_params = Qx, Qy, Qz, data_norm, sig_data, counts, mask, mask, c, S
-
-    Sp = ellipsoid.optimize_signal_to_noise(*norm_params)
-
-    norm_params = Qx, Qy, Qz, data_norm, sig_data, counts, mask, mask, c, Sp
+    norm_params = Qx, Qy, Qz, counts, norm, mask, mask, c, S
 
     I, sigma = ellipsoid.integrate(*norm_params)
 
@@ -211,8 +207,6 @@ def test_peak_plot():
 
     plot.add_ellipsoid(c, S)
 
-    plot.update_envelope(c, Sp)
-
     plot.add_peak_info(hkl, d, wavelength, angles, goniometer)
 
     plot.add_peak_stats(
@@ -220,6 +214,10 @@ def test_peak_plot():
     )
 
     plot.add_data_norm_fit(*ellipsoid.data_norm_fit)
+
+    plot.update_envelope(*ellipsoid.peak_background_mask)
+
+    plot.add_integral_fit(ellipsoid.integral)
 
     file = os.path.join(filepath, "ellipsoid.png")
 
