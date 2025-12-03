@@ -1638,6 +1638,7 @@ class Peaks:
         log_info = np.all(
             ["peaks_{}".format(item) in run_keys for item in items]
         )
+        print(log_info)
 
         if log_info:
             h = run_info.getLogData("peaks_h").value
@@ -1692,7 +1693,9 @@ class Peaks:
 
         for peak in mtd[self.peaks]:
             run = int(peak.getRunNumber())
-            scale = rate_dict[run]
+            scale = rate_dict.get(run)
+            if scale is None:
+                scale = 0
             peak.setIntensity(scale * peak.getIntensity())
             peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
