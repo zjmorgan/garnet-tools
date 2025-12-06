@@ -40,6 +40,18 @@ class ParallelTasks:
 
         runs = plan["Runs"]
         split = [split.tolist() for split in np.array_split(runs, n_proc)]
+
+        process_map = {}
+        for proc_idx, s in enumerate(split):
+            for r in s:
+                try:
+                    key = int(r)
+                except Exception:
+                    key = r
+                process_map[key] = proc_idx
+
+        plan["ProcessMap"] = process_map
+
         join_args = [(plan, s, proc) for proc, s in enumerate(split)]
 
         config["MultiThreaded.MaxCores"] = "1"

@@ -188,6 +188,8 @@ class Integration(SubPlan):
         data = DataModel(beamlines[self.plan["Instrument"]])
         data.update_raw_path(self.plan)
 
+        data.combine_files(self.plan["IPTS"], self.plan["ProcessMap"])
+
         peaks = PeaksModel()
 
         self.make_plot = True
@@ -281,8 +283,6 @@ class Integration(SubPlan):
 
                 data.load_clear_UB(ub_file, "data", run)
 
-            data.convert_to_Q_sample("data", "md", lorentz_corr=False)
-
             peaks.predict_peaks(
                 "data",
                 "peaks",
@@ -298,6 +298,8 @@ class Integration(SubPlan):
             self.peaks, self.data = peaks, data
 
             r_cut = self.params["Radius"]
+
+            self.r_cut = r_cut
 
             if not self.params.get("Recalibrate"):
                 est_file = self.get_plot_file("centroid#{}".format(run))
@@ -327,6 +329,14 @@ class Integration(SubPlan):
 
             self.predict_add_satellite_peaks(lamda_min, lamda_max)
 
+            banks = peaks.get_bank_names("peaks")
+
+            for bank in banks:
+                data.mask_to_bank("data", bank)
+                data.convert_to_Q_sample(bank, bank, lorentz_corr=False)
+
+            data.delete_workspace("data")
+
             est_file = self.get_plot_file("profile#{}".format(run))
 
             params = self.estimate_peak_size("peaks", r_cut, est_file)
@@ -341,8 +351,6 @@ class Integration(SubPlan):
 
             peaks.update_scale_factor("peaks", data.monitor)
 
-            data.delete_workspace("data")
-
             peaks.combine_peaks("peaks", "combine")
 
             pk_file = self.get_diagnostic_file("run#{}_peaks".format(run))
@@ -351,7 +359,8 @@ class Integration(SubPlan):
 
             data.delete_workspace("peaks")
 
-            data.delete_workspace("md")
+            for bank in banks:
+                data.delete_workspace(bank)
 
         peaks.remove_weak_peaks("combine", -100)
 
@@ -1035,9 +1044,12 @@ class Integration(SubPlan):
             print(self.status + " 1/2 {:}/{:}".format(i, self.total))
 
             d_spacing = peak.get_d_spacing(i)
+
             Q = 2 * np.pi / d_spacing
 
             hkl = peak.get_hkl(i)
+
+            Q_vec = peak.get_sample_Q(i)
 
             lamda = peak.get_wavelength(i)
 
@@ -1055,6 +1067,8 @@ class Integration(SubPlan):
 
             R = peak.get_goniometer_matrix(i)
 
+            bank_name = peak.get_bank_name(i)
+
             bin_params = UB, hkl, lamda, R, two_theta, az_phi, r_cut, dQ, fit
 
             bin_extent = self.bin_extent(*bin_params)
@@ -1062,12 +1076,16 @@ class Integration(SubPlan):
             bins, extents, projections, transform = bin_extent
 
             if norm:
-                data.normalize_to_hkl("md", transform, extents, bins)
+                slice_extents = data.slice_extents(Q_vec, self.r_cut)
 
-                d, _, Q0, Q1, Q2 = data.extract_bin_info("md_data")
-                n, _, Q0, Q1, Q2 = data.extract_bin_info("md_norm")
+                data.slice_roi(bank_name, slice_extents)
 
-                data.check_volume_preservation("md_result")
+                data.normalize_to_hkl(bank_name, transform, extents, bins)
+
+                d, _, Q0, Q1, Q2 = data.extract_bin_info(bank_name + "_data")
+                n, _, Q0, Q1, Q2 = data.extract_bin_info(bank_name + "_norm")
+
+                data.check_volume_preservation(bank_name + "_result")
 
                 peak_file = self.get_diagnostic_file(peak_name)
 
@@ -1078,15 +1096,15 @@ class Integration(SubPlan):
                 data_file = self.get_diagnostic_file(peak_name + "_data")
                 norm_file = self.get_diagnostic_file(peak_name + "_norm")
 
-                data.save_histograms(data_file, "md_data")
-                data.save_histograms(norm_file, "md_norm")
+                data.save_histograms(data_file, bank_name + "_data")
+                data.save_histograms(norm_file, bank_name + "_norm")
 
-                data.clear_norm("md")
+                data.clear_norm(bank_name)
 
             else:
-                d, _, Q0, Q1, Q2 = data.bin_in_Q(
-                    "md", extents, bins, projections
-                )
+                result = data.bin_in_Q("md", extents, bins, projections)
+
+                d, _, Q0, Q1, Q2 = result
 
                 n = d > 0
 
@@ -3650,123 +3668,90 @@ class PeakEllipsoid:
 
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
-    def spherical_intensitiy(self, x0, x1, x2, d, n, c, S):
-        scale = np.sqrt(scipy.stats.chi2.ppf(0.997, df=3))
-        C = S / scale**2
-
-        e = np.sqrt(d) / n
-
-        mask = np.isfinite(e) & (e > 0)
+    def fitted_profile(self, x0, x1, x2, d, n, c, S, p=0.997):
+        scale = scipy.stats.chi2.ppf(p, df=3)
 
         c0, c1, c2 = c
 
+        dx0, dx1, dx2 = self.voxels(x0, x1, x2)
+
         x = np.array([x0 - c0, x1 - c1, x2 - c2])
 
-        C_inv = np.linalg.inv(C)
+        S_inv = np.linalg.inv(S * np.cbrt(2) ** 2)
 
-        r = np.sqrt(np.einsum("ij,jklm,iklm->klm", C_inv, x, x))
+        S_inv[0, 0] /= 2**2
 
-        R = np.histogram_bin_edges(r[mask], bins="auto")
+        ellipsoid = np.einsum("ij,jklm,iklm->klm", S_inv, x, x)
 
-        D, _ = np.histogram(r[mask], bins=R, weights=d[mask], density=False)
-        N, _ = np.histogram(r[mask], bins=R, weights=n[mask], density=False)
+        mask = ellipsoid <= 1
 
-        R = 0.5 * (R[1:] + R[:-1])
+        d_int = d.copy()
+        n_int = n.copy()
 
-        Y = D / N
-        E = np.sqrt(D) / N
+        n_int[np.isclose(n, 0)] = np.nan
 
-        mask = np.isfinite(E) & (E > 0)
+        d_int[~mask] = np.nan
+        n_int[~mask] = np.nan
 
-        norm = np.sqrt(np.linalg.det(2 * np.pi * C))
+        d_int = np.nansum(d_int, axis=(1, 2))
+        n_int = np.nanmean(n_int / dx1 / dx2, axis=(1, 2))
 
-        K = np.exp(-0.5 * R**2) / norm
+        x = x0[:, 0, 0] - c0
+        y = d_int / n_int
+        e = np.sqrt(d_int) / n_int
 
-        dR = np.diff(R).mean()
+        b = np.nanpercentile(y, 10)
+        I = np.nansum(y - b) * dx0
 
-        pk = R / scale <= 1
-        bkg = R / scale > 1
+        mu = 0
+        sigma = np.sqrt(S[0, 0] / scale)
 
-        b = np.nanmean(Y[bkg])
-        b_err = np.sqrt(np.nanmean(E[bkg] ** 2))
+        I_min, b_min, mu_min, sigma_min = 0, 0, x[0], 0.5 * sigma
+        I_max, b_max, mu_max, sigma_max = 2 * I, np.nanmax(y), x[-1], 2 * sigma
 
-        I = np.nansum(Y[pk] - b) * dR * norm
-        I_err = np.nansum(E[pk] ** 2 + b_err**2) * dR * norm
+        x0 = [I, b, mu, sigma]
+        bounds = (
+            [I_min, b_min, mu_min, sigma_min],
+            [I_max, b_max, mu_max, sigma_max],
+        )
 
-        return I, I_err, b, b_err, R / scale, I * K + b, Y, E
+        sol = scipy.optimize.least_squares(
+            self.profile_cost,
+            x0=x0,
+            bounds=bounds,
+            args=(x, y, e),
+        )
 
-    #     x0 = [np.max(Y[mask]), np.median(Y[mask])]
+        J = sol.jac
+        inv_cov = J.T.dot(J)
 
-    #     sol = scipy.optimize.least_squares(
-    #         self.whiten_residuals,
-    #         x0,
-    #         args=(K[mask], Y[mask], E[mask] * 0 +1),
-    #         loss='soft_l1',
-    #     )
+        I, b, mu, sigma = sol.x
 
-    #     A, b = sol.x
+        cov = (
+            np.linalg.inv(inv_cov)
+            if np.linalg.det(inv_cov) > 0
+            else np.zeros((3, 3))
+        )
 
-    #     J = sol.jac
-    #     inv_cov = J.T.dot(J)
-    #     if np.linalg.det(inv_cov) > 0:
-    #         cov = np.linalg.inv(inv_cov)
-    #     else:
-    #         cov = np.diag(sol.x)
+        chi2dof = np.sum(sol.fun**2) / (sol.fun.size - sol.x.size)
+        cov *= chi2dof
 
-    #     chi2dof = np.sum(sol.fun**2)/(sol.fun.size-sol.x.size)
-    #     cov *= chi2dof
+        I_err, b_err, mu_err, sigma_err = np.sqrt(np.diagonal(cov))
 
-    #     A_err, b_err = np.sqrt(np.diag(cov))
+        y_fit = self.profile_function(sol.x, x)
 
-    #     return A, A_err, b, b_err, R, A * K + b, Y, E
+        return I, I_err, b, b_err, x, y_fit, y, e
 
-    # def whiten_model(self, x, k):
-    #     A, b = x
-    #     return A * k + b
+    def profile_function(self, params, x):
+        I, b, mu, sigma = params
+        d2 = (x - mu) ** 2 / sigma**2
+        norm = np.sqrt(2 * np.pi) * sigma
+        return I * np.exp(-0.5 * d2) / norm + b
 
-    # def whiten_residuals(self, x, k, y, e):
-    #     return (self.whiten_model(x, k) - y) / e
-
-    # def whitened_intensitiy(self, x0, x1, x2, d, n, c, S):
-    #     scale = np.sqrt(scipy.stats.chi2.ppf(0.997, df=3))
-
-    #     V, R = np.linalg.eigh(S)
-    #     W = (R @ np.diag(scale / np.sqrt(V)) @ R.T)
-
-    #     c0, c1, c2 = c
-
-    #     mu = [x0 - c0, x1 - c1, x2 - c2]
-    #     r = np.linalg.norm(np.einsum('i...,ij->j...', mu, W.T), axis=0)
-
-    #     y = d / n
-    #     e = np.sqrt(d) / n
-
-    #     mask = np.isfinite(e) & (e > 0)
-
-    #     K = np.exp(-0.5 * r[mask]**2)
-
-    #     X = np.column_stack([K, np.ones_like(K)])
-
-    #     w = 1 / e[mask]
-    #     Xw = X * w[:, None]
-
-    #     I = y[mask]
-    #     Iw = I * w
-
-    #     p, residuals, rank, s = np.linalg.lstsq(Xw, Iw, rcond=None)
-    #     A, b = p
-
-    #     N, n = X.shape
-    #     res = Xw @ p - I
-    #     chi2 = np.sum(res**2)
-    #     s2 = chi2 / (N - n)
-
-    #     XtX = Xw.T @ Xw
-    #     cov = s2 * np.linalg.inv(XtX)
-
-    #     A_err, b_err = np.sqrt(np.diag(cov))
-
-    #     return A, A_err, b, b_err, r[mask], A * K + b, y[mask], e[mask]
+    def profile_cost(self, params, x, y, e):
+        y_fit = self.profile_function(params, x)
+        wr = (y_fit - y) / e
+        return wr[np.isfinite(wr)]
 
     def integrate(self, x0, x1, x2, d, n, val_mask, det_mask, c, S):
         dx0, dx1, dx2 = self.voxels(x0, x1, x2)
@@ -3812,13 +3797,13 @@ class PeakEllipsoid:
 
         self.peak_background_mask = x0, x1, x2, pk, bkg
 
-        result = self.spherical_intensitiy(x0, x1, x2, d, n, c, S)
+        result = self.fitted_profile(x0, x1, x2, d, n, c, S)
 
-        I, I_err, b, b_err, r, y_fit, y, e = result
+        I, I_err, b, b_err, x, y_fit, y, e = result
 
-        self.integral = r, y_fit, y, e
+        self.integral = x, y_fit, y, e
 
         self.intensity.append(I)
         self.sigma.append(I_err)
 
-        return intens, sig
+        return I, I_err

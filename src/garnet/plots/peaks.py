@@ -424,7 +424,7 @@ class PeakPlot(BasePlot):
         ax = self.fig.add_subplot(gs[0, 0])
 
         ax.minorticks_on()
-        ax.set_xlabel(r"$r$")
+        ax.set_xlabel(r"$\Delta|Q|$ [$\AA^{-1}$]")
 
         x = np.arange(10) - 5
         y = -2 * x**2 + 50
@@ -432,7 +432,7 @@ class PeakPlot(BasePlot):
 
         self.int = ax
 
-        error_cont = ax.errorbar(x, y, e, fmt=".", color="C0", zorder=1)
+        error_cont = ax.errorbar(x, y, e, fmt="o", color="C0", zorder=1)
         plot_line = ax.step(x, y, where="mid", color="C1", zorder=0)
 
         self.int_error.append(error_cont)

@@ -958,6 +958,24 @@ class PeaksModel:
 
         return np.array(Rs)
 
+    def get_bank_names(self, peaks):
+        """
+        Obtain the bank names.
+
+        Parameters
+        ----------
+        peaks : str
+            Name of peaks table.
+
+        Returns
+        -------
+        banks : str
+            Unique bank names.
+
+        """
+
+        return np.unique(mtd[peaks].column("BankName")).tolist()
+
     def renumber_runs_by_index(self, ws, peaks):
         """
         Re-label the runs by index based on goniometer setting.
@@ -1766,3 +1784,21 @@ class PeakModel:
 
         mtd[self.peaks].getPeak(no).setBinCount(scale)
         mtd[self.peaks].getPeak(no).setMonitorCount(scale)
+
+    def get_bank_name(self, no):
+        """
+        Obtain the bank name.
+
+        Parameters
+        ----------
+        no : int
+            Peak index number.
+
+        Returns
+        -------
+        bank : str
+            Bank name.
+
+        """
+
+        return mtd[self.peaks].column("BankName")[no]

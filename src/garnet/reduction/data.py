@@ -9,6 +9,8 @@ from mantid.simpleapi import (
     LoadEventNexus,
     LoadParameterFile,
     LoadIsawDetCal,
+    LoadNexusLogs,
+    CreateSampleWorkspace,
     Rebin,
     ApplyCalibration,
     Multiply,
@@ -37,6 +39,7 @@ from mantid.simpleapi import (
     ConvertWANDSCDtoQ,
     ConvertUnits,
     CropWorkspaceForMDNorm,
+    CropToComponent,
     RecalculateTrajectoriesExtents,
     ClearUB,
     LoadIsawUB,
@@ -203,6 +206,33 @@ class BaseDataModel:
             LoadEmptyInstrument(
                 InstrumentName=self.ref_inst, OutputWorkspace=self.instrument
             )
+
+        CloneWorkspace(
+            InputWorkspace=self.instrument,
+            OutputWorkspace="goniometer",
+        )
+
+    def combine_files(self, IPTS, process_map):
+        """
+        Combine runs together based on crystal orientation.
+
+        """
+
+        gon = self.instrument_config.get("Goniometer")
+        gon_axis_names = self.instrument_config.get("GoniometerAxisNames")
+        if gon_axis_names is None:
+            gon_axis_names = list(gon.keys())
+
+        gonio = ",".join(gon_axis_names)
+
+        runs = list(process_map.keys())
+
+        filenames = [self.file_names(IPTS, run) for run in runs]
+
+        for filename in filenames:
+            CreateSampleWorkspace(OutputWorkspace="logs")
+            LoadNexusLogs(Workspace="logs", Filename=filename, AllowList=gonio)
+            self.set_goniometer("logs")
 
     def load_clear_UB(self, filename, ws, run_number=None):
         """
@@ -809,6 +839,9 @@ class BaseDataModel:
 
             return y, e, x0, x1, x2
 
+    def slice_extents(self, c, r):
+        return [x for v in c for x in [v - r, v + r]]
+
     def slice_roi(self, md, extents):
         extents = np.array(extents).flatten().tolist()
 
@@ -1248,10 +1281,6 @@ class LaueData(BaseDataModel):
         self.sa_cal = False
         self.flux_cal = False
 
-        LoadEmptyInstrument(
-            InstrumentName=self.ref_inst, OutputWorkspace="goniometer"
-        )
-
     def load_data(self, event_name, IPTS, runs, grouping=None, time_cut=None):
         """
         Load raw data into time-of-flight vs counts.
@@ -1477,6 +1506,25 @@ class LaueData(BaseDataModel):
             self.theta_max = 0.5 * np.max(two_theta)
 
             self.calculate_maximum_Q()
+
+    def mask_to_bank(self, event_name, bank_name):
+        """
+        Mask to bank
+
+        Parameters
+        ----------
+        event_name : str
+            Name of raw event_name data.
+        bank_name : str
+            Bank name.
+
+        """
+
+        CropToComponent(
+            InputWorkspace=event_name,
+            OutputWorkspace=bank_name,
+            ComponentNames=bank_name,
+        )
 
     def apply_mask(self, event_name, detector_mask):
         """

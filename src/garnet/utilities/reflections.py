@@ -1336,7 +1336,7 @@ class Peaks:
         opt.optimize_lattice(cell)
 
     def rescale_intensities(self):
-        maximal = 10000.00
+        maximal = 10000
         scale = 1 if self.scale is None else self.scale
         if mtd[self.peaks].getNumberPeaks() > 1 and self.scale is None:
             I = np.array(mtd[self.peaks].column("Intens"))
@@ -1350,6 +1350,8 @@ class Peaks:
             peak.setIntensity(scale * peak.getIntensity())
             peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
             if peak.getIntensity() > 10 * maximal:
+                peak.setSigmaIntensity(float("-inf"))
+            if peak.getSigmaIntensity() > 10 * maximal:
                 peak.setSigmaIntensity(float("-inf"))
             peak.setPeakNumber(peak.getRunNumber())
             peak.setBinCount(peak.getRunNumber())
