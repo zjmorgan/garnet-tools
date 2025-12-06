@@ -333,9 +333,8 @@ class Integration(SubPlan):
 
             for bank in banks:
                 data.mask_to_bank("data", bank)
-                data.convert_to_Q_sample(bank, bank, lorentz_corr=False)
-
-            data.delete_workspace("data")
+                data.preprocess_detector_banks(bank)
+                data.convert_to_Q_sample(bank, bank, False, bank + "_det")
 
             est_file = self.get_plot_file("profile#{}".format(run))
 
@@ -356,6 +355,8 @@ class Integration(SubPlan):
             pk_file = self.get_diagnostic_file("run#{}_peaks".format(run))
 
             peaks.save_peaks(pk_file, "peaks")
+
+            data.delete_workspace("data")
 
             data.delete_workspace("peaks")
 
@@ -1080,12 +1081,14 @@ class Integration(SubPlan):
 
                 data.slice_roi(bank_name, slice_extents)
 
-                data.normalize_to_hkl(bank_name, transform, extents, bins)
+                md = bank_name + "_slice"
 
-                d, _, Q0, Q1, Q2 = data.extract_bin_info(bank_name + "_data")
-                n, _, Q0, Q1, Q2 = data.extract_bin_info(bank_name + "_norm")
+                data.normalize_to_hkl(md, transform, extents, bins)
 
-                data.check_volume_preservation(bank_name + "_result")
+                d, _, Q0, Q1, Q2 = data.extract_bin_info(md + "_data")
+                n, _, Q0, Q1, Q2 = data.extract_bin_info(md + "_norm")
+
+                data.check_volume_preservation(md + "_result")
 
                 peak_file = self.get_diagnostic_file(peak_name)
 
@@ -1096,10 +1099,10 @@ class Integration(SubPlan):
                 data_file = self.get_diagnostic_file(peak_name + "_data")
                 norm_file = self.get_diagnostic_file(peak_name + "_norm")
 
-                data.save_histograms(data_file, bank_name + "_data")
-                data.save_histograms(norm_file, bank_name + "_norm")
+                data.save_histograms(data_file, md + "_data")
+                data.save_histograms(norm_file, md + "_norm")
 
-                data.clear_norm(bank_name)
+                data.clear_norm(md)
 
             else:
                 result = data.bin_in_Q("md", extents, bins, projections)
@@ -1389,19 +1392,15 @@ class Integration(SubPlan):
             [[Q0 - dQ0, Q0 + dQ0], [Q1 - dQ1, Q1 + dQ1], [Q2 - dQ2, Q2 + dQ2]]
         )
 
-        if fit:
-            min_adjusted = np.floor(extents[:, 0] / bin_sizes) * bin_sizes
-            max_adjusted = np.ceil(extents[:, 1] / bin_sizes) * bin_sizes
+        min_adjusted = np.floor(extents[:, 0] / bin_sizes) * bin_sizes
+        max_adjusted = np.ceil(extents[:, 1] / bin_sizes) * bin_sizes
 
-            bins = ((max_adjusted - min_adjusted) / bin_sizes).astype(int)
+        bins = ((max_adjusted - min_adjusted) / bin_sizes).astype(int)
 
-            bins[bins > n_bins] = n_bins
-            bins[bins < 10] = 10
+        bins[bins > n_bins] = n_bins
+        bins[bins < 10] = 10
 
-            extents = np.vstack((min_adjusted, max_adjusted)).T
-
-        else:
-            bins = np.array([n_bins, n_bins, n_bins])
+        extents = np.vstack((min_adjusted, max_adjusted)).T
 
         return bins, extents, projections, transform
 
@@ -3669,7 +3668,7 @@ class PeakEllipsoid:
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
     def fitted_profile(self, x0, x1, x2, d, n, c, S, p=0.997):
-        scale = scipy.stats.chi2.ppf(p, df=3)
+        scale = scipy.stats.chi2.ppf(p, df=1)
 
         c0, c1, c2 = c
 
@@ -3677,18 +3676,26 @@ class PeakEllipsoid:
 
         x = np.array([x0 - c0, x1 - c1, x2 - c2])
 
-        S_inv = np.linalg.inv(S * np.cbrt(2) ** 2)
+        C = S.copy()
+        C *= np.cbrt(2) ** 2
 
-        S_inv[0, 0] /= 2**2
+        S_inv = np.linalg.inv(C)
 
         ellipsoid = np.einsum("ij,jklm,iklm->klm", S_inv, x, x)
 
-        mask = ellipsoid <= 1
+        C = S.copy()
+        C[0, 0] *= 2**2
+
+        S_inv = np.linalg.inv(C)
+
+        profile = np.einsum("ij,jklm,iklm->klm", S_inv, x, x)
+
+        mask = (ellipsoid <= 1) | (profile <= 1)
 
         d_int = d.copy()
         n_int = n.copy()
 
-        n_int[np.isclose(n, 0)] = np.nan
+        n_int[n == 0] = np.nan
 
         d_int[~mask] = np.nan
         n_int[~mask] = np.nan
@@ -3698,7 +3705,7 @@ class PeakEllipsoid:
 
         x = x0[:, 0, 0] - c0
         y = d_int / n_int
-        e = np.sqrt(d_int) / n_int
+        e = np.sqrt(d_int + 1) / n_int
 
         b = np.nanpercentile(y, 10)
         I = np.nansum(y - b) * dx0

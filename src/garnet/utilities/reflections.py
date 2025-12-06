@@ -1456,7 +1456,7 @@ class Peaks:
         vol_Q1, vol_Q3 = np.nanpercentile(Q_vol, [25, 75])
         vol_IQR = vol_Q3 - vol_Q1
 
-        vol_cut = vol_Q3 + 1.5 * vol_IQR
+        vol_cut = vol_Q3 + 3 * vol_IQR
 
         filename = os.path.splitext(self.filename)[0]
 
@@ -1472,11 +1472,11 @@ class Peaks:
         ax[2].minorticks_on()
         ax[3].minorticks_on()
         ax[4].minorticks_on()
-        ax[0].plot(Q0_mod, powder_err, ",", color="C0", rasterized=True)
-        ax[1].plot(Q0_mod, peak_err[:, 0], ",", color="C1", rasterized=True)
-        ax[2].plot(Q0_mod, peak_err[:, 1], ",", color="C2", rasterized=True)
-        ax[3].plot(Q0_mod, peak_err[:, 2], ",", color="C3", rasterized=True)
-        ax[4].plot(Q0_mod, Q_vol, ",", color="C4", rasterized=True)
+        ax[0].plot(Q0_mod, powder_err, ".", color="C0", rasterized=True)
+        ax[1].plot(Q0_mod, peak_err[:, 0], ".", color="C1", rasterized=True)
+        ax[2].plot(Q0_mod, peak_err[:, 1], ".", color="C2", rasterized=True)
+        ax[3].plot(Q0_mod, peak_err[:, 2], ".", color="C3", rasterized=True)
+        ax[4].plot(Q0_mod, Q_vol, ".", color="C4", rasterized=True)
         ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
         ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
         ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
@@ -1611,7 +1611,7 @@ class Peaks:
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
             FilterVariable="Signal/Noise",
-            FilterValue=-1,
+            FilterValue=1,
             Operator=">",
         )
 
@@ -1621,7 +1621,7 @@ class Peaks:
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
             FilterVariable="Signal/Noise",
-            FilterValue=-1,
+            FilterValue=1,
             Operator=">",
         )
 
@@ -1693,13 +1693,13 @@ class Peaks:
         ax.set_ylabel("Count rate")
         fig.savefig(filename + "_rate.pdf")
 
-        for peak in mtd[self.peaks]:
-            run = int(peak.getRunNumber())
-            scale = rate_dict.get(run)
-            if scale is None:
-                scale = 0
-            peak.setIntensity(scale * peak.getIntensity())
-            peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
+        # for peak in mtd[self.peaks]:
+        #     run = int(peak.getRunNumber())
+        #     scale = rate_dict.get(run)
+        #     if scale is None:
+        #         scale = 0
+        #     peak.setIntensity(scale * peak.getIntensity())
+        #     peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         self.info_dict = info_dict
         self.norm_dict = norm_dict
@@ -2304,10 +2304,18 @@ class Peaks:
         return R_merge
 
     def calculate_statistics(self, name, filename):
+        FilterPeaks(
+            InputWorkspace=name,
+            OutputWorkspace=name + "_stats",
+            FilterVariable="Signal/Noise",
+            FilterValue=3,
+            Operator=">",
+        )
+
         point_groups, R_merge = [], []
         for point_group in self.point_groups:
             StatisticsOfPeaksWorkspace(
-                InputWorkspace=name,
+                InputWorkspace=name + "_stats",
                 PointGroup=point_group_dict[point_group],
                 OutputWorkspace="stats",
                 EquivalentIntensities="Median",
@@ -2326,7 +2334,7 @@ class Peaks:
         # self.refine_scales(name, 'run')
 
         StatisticsOfPeaksWorkspace(
-            InputWorkspace=name,
+            InputWorkspace=name + "_stats",
             PointGroup=point_group_dict[point_group],
             OutputWorkspace="stats",
             EquivalentIntensities="Median",

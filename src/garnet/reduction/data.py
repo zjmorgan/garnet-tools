@@ -840,7 +840,7 @@ class BaseDataModel:
             return y, e, x0, x1, x2
 
     def slice_extents(self, c, r):
-        return [x for v in c for x in [v - r, v + r]]
+        return [x for v in c for x in [v - 3 * r, v + 3 * r]]
 
     def slice_roi(self, md, extents):
         extents = np.array(extents).flatten().tolist()
@@ -1464,6 +1464,22 @@ class LaueData(BaseDataModel):
                 "flux", detector_calibration, tube_calibration
             )
 
+    def preprocess_detector_banks(self, bank):
+        """
+        Generate detector coordinates for each bank.
+
+        Parameters
+        ----------
+        bank : str
+            Bank-only event data.
+
+        """
+
+        if not mtd.doesExist(bank + "_dets"):
+            PreprocessDetectorsToMD(
+                InputWorkspace=bank, OutputWorkspace=bank + "_dets"
+            )
+
     def preprocess_detectors(self, ws=None):
         """
         Generate detector coordinates.
@@ -1615,7 +1631,9 @@ class LaueData(BaseDataModel):
                 Tolerance=1e-3,
             )
 
-    def convert_to_Q_sample(self, event_name, md_name, lorentz_corr=False):
+    def convert_to_Q_sample(
+        self, event_name, md_name, lorentz_corr=False, preproc_dets=None
+    ):
         """
         Convert raw data to Q-sample.
 
@@ -1627,6 +1645,8 @@ class LaueData(BaseDataModel):
             Name of Q-sample workspace.
         lorentz_corr : bool, optional
             Apply Lorentz correction. The default is False.
+        preproc_dets: str, optional
+            Preprocess detector information workspace.
 
         """
 
@@ -1637,6 +1657,9 @@ class LaueData(BaseDataModel):
         if mtd.doesExist(event_name):
             Q_min_vals, Q_max_vals = self.get_min_max_values()
 
+            if preproc_dets is None:
+                preproc_dets = "detectors"
+
             ConvertToMD(
                 InputWorkspace=event_name,
                 QDimensions="Q3D",
@@ -1646,7 +1669,7 @@ class LaueData(BaseDataModel):
                 MinValues=Q_min_vals,
                 MaxValues=Q_max_vals,
                 OutputWorkspace=md_name,
-                PreprocDetectorsWS="detectors",
+                PreprocDetectorsWS=preproc_dets,
                 SplitInto=2,
                 MaxRecursionDepth=10,
             )
@@ -1927,7 +1950,7 @@ class LaueData(BaseDataModel):
             __norm = self.workspace_exists(md + "_bkg_norm")
 
             MDNorm(
-                InputWorkspace="md",
+                InputWorkspace=md,
                 SolidAngleWorkspace="sa",
                 FluxWorkspace="flux",
                 BackgroundWorkspace=bkg_ws,
