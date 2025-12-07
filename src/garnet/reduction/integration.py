@@ -329,20 +329,30 @@ class Integration(SubPlan):
 
             self.predict_add_satellite_peaks(lamda_min, lamda_max)
 
-            banks = peaks.get_bank_names("peaks")
-
-            for bank in banks:
-                data.mask_to_bank("data", bank)
-                data.preprocess_detector_banks(bank)
-                data.convert_to_Q_sample(bank, bank, False, bank + "_det")
-
             est_file = self.get_plot_file("profile#{}".format(run))
 
             params = self.estimate_peak_size("peaks", r_cut, est_file)
 
             fit = self.params["ProfileFit"]
 
-            peak_dict = self.extract_peak_info("peaks", params, True, fit)
+            banks = peaks.get_bank_names("peaks")
+
+            peak_dict = {}
+
+            for bank in banks:
+                data.mask_to_bank("data", bank)
+
+                data.preprocess_detector_banks(bank)
+
+                data.convert_to_Q_sample(bank, bank, False, bank + "_det")
+
+                bank_dict = self.extract_peak_info(
+                    "peaks", params, True, fit, bank
+                )
+
+                data.delete_workspace(bank)
+
+                peak_dict = {**peak_dict, **bank_dict}
 
             results = self.integrate_peaks(peak_dict)
 
@@ -359,9 +369,6 @@ class Integration(SubPlan):
             data.delete_workspace("data")
 
             data.delete_workspace("peaks")
-
-            for bank in banks:
-                data.delete_workspace(bank)
 
         peaks.remove_weak_peaks("combine", -100)
 
@@ -1016,7 +1023,9 @@ class Integration(SubPlan):
 
         return gd, gn, detection_mask, detection_mask
 
-    def extract_peak_info(self, peaks_ws, r_cut, norm=False, fit=True):
+    def extract_peak_info(
+        self, peaks_ws, r_cut, norm=False, fit=True, bank=None
+    ):
         """
         Obtain peak information for envelope determination.
 
@@ -1041,7 +1050,16 @@ class Integration(SubPlan):
 
         self.total = n_peak
 
-        for i in range(n_peak):
+        indices = range(n_peak)
+
+        if bank is not None:
+            inds = []
+            for i in indices:
+                if peak.get_bank_name(i) == bank:
+                    inds.append(i)
+            indices = inds
+
+        for i in indices:
             print(self.status + " 1/2 {:}/{:}".format(i, self.total))
 
             d_spacing = peak.get_d_spacing(i)
@@ -1348,10 +1366,9 @@ class Integration(SubPlan):
 
         Q0, Q1, Q2 = 2 * np.pi * np.dot(W.T, np.dot(UB, [h, k, l]))
 
-        n_bins = 21 if fit else 21
-
         if type(r_cut) is float:
             dQ_cut = 3 * [r_cut]
+            n_bins = 21
         else:
             (r0, r1, r2), (dr0, dr1, dr2) = r_cut
             dQ_cut = [
@@ -1359,7 +1376,7 @@ class Integration(SubPlan):
                 (r1 + dr1 * dQ) * 3,
                 (r2 + dr2 * dQ) * 3,
             ]
-            n_bins *= 2
+            n_bins = 21
 
         bin_sizes = np.array(dQ_cut) / n_bins
 
@@ -3716,17 +3733,18 @@ class PeakEllipsoid:
         I_min, b_min, mu_min, sigma_min = 0, 0, x[0], 0.5 * sigma
         I_max, b_max, mu_max, sigma_max = 2 * I, np.nanmax(y), x[-1], 2 * sigma
 
-        x0 = [I, b, mu, sigma]
         bounds = (
             [I_min, b_min, mu_min, sigma_min],
             [I_max, b_max, mu_max, sigma_max],
         )
 
+        x0 = [I, b, mu, sigma]
         sol = scipy.optimize.least_squares(
             self.profile_cost,
             x0=x0,
             bounds=bounds,
             args=(x, y, e),
+            loss="soft_l1",
         )
 
         J = sol.jac
@@ -3755,10 +3773,10 @@ class PeakEllipsoid:
         norm = np.sqrt(2 * np.pi) * sigma
         return I * np.exp(-0.5 * d2) / norm + b
 
-    def profile_cost(self, params, x, y, e):
+    def profile_cost(self, params, x, y, e, lamda=0.01):
         y_fit = self.profile_function(params, x)
         wr = (y_fit - y) / e
-        return wr[np.isfinite(wr)]
+        return np.concatenate([wr[np.isfinite(wr)], lamda * np.array(params)])
 
     def integrate(self, x0, x1, x2, d, n, val_mask, det_mask, c, S):
         dx0, dx1, dx2 = self.voxels(x0, x1, x2)
@@ -3813,4 +3831,4 @@ class PeakEllipsoid:
         self.intensity.append(I)
         self.sigma.append(I_err)
 
-        return I, I_err
+        return intens, sig

@@ -902,6 +902,27 @@ class PeaksModel:
             OutputWorkspace=peaks,
         )
 
+    def sort_peaks_by_bank(self, peaks):
+        """
+        Sort peaks table by ascending bank number
+
+        Parameters
+        ----------
+        peaks : str
+            Name of peaks table.
+
+        """
+
+        SortPeaksWorkspace(
+            InputWorkspace=peaks,
+            ColumnNameToSortBy="BankName",
+            SortAscending=True,
+            OutputWorkspace=peaks,
+        )
+
+        for i, peak in enumerate(mtd[peaks]):
+            peak.setPeakNumber(i)
+
     def remove_duplicate_peaks(self, peaks):
         """
         Omit duplicate peaks from different based on indexing.
