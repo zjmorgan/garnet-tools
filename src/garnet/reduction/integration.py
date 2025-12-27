@@ -188,7 +188,7 @@ class Integration(SubPlan):
         data = DataModel(beamlines[self.plan["Instrument"]])
         data.update_raw_path(self.plan)
 
-        data.combine_files(self.plan["IPTS"], self.plan["ProcessMap"])
+        # data.combine_files(self.plan["IPTS"], self.plan["ProcessMap"])
 
         peaks = PeaksModel()
 

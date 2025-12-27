@@ -38,18 +38,25 @@ class Normalization(SubPlan):
 
         if self.params.get("Symmetry") is not None:
             symmetry = self.params["Symmetry"].replace(" ", "")
-            self.check(
-                symmetry, "in", symbols, f"Unknown Symmetry: {symmetry}"
-            )
-            if symmetry in space_point:
-                symmetry = space_point[symmetry]
-            self.check(
-                symmetry,
-                "in",
-                point_laue.keys(),
-                f"Unknown point group: {symmetry}",
-            )
-            symmetry = point_laue[symmetry]
+            if "x" in symmetry and "y" in symmetry and "z" in symmetry:
+                ops = [symm.split(",") for symm in symmetry.split(";")]
+                for op in ops:
+                    self.check(
+                        len(op), "==", 3, "Operators must have length 3"
+                    )
+            else:
+                self.check(
+                    symmetry, "in", symbols, f"Unknown Symmetry: {symmetry}"
+                )
+                if symmetry in space_point:
+                    symmetry = space_point[symmetry]
+                self.check(
+                    symmetry,
+                    "in",
+                    point_laue.keys(),
+                    f"Unknown point group: {symmetry}",
+                )
+                symmetry = point_laue[symmetry]
             self.params["Symmetry"] = symmetry
 
         self.check(
@@ -256,7 +263,6 @@ class Normalization(SubPlan):
         """
 
         elastic = self.plan.get("Elastic")
-        print("_cc" if elastic else "")
 
         return "_cc" if elastic else ""
 

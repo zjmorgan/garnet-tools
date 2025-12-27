@@ -840,7 +840,7 @@ class BaseDataModel:
             return y, e, x0, x1, x2
 
     def slice_extents(self, c, r):
-        return [x for v in c for x in [v - 3 * r, v + 3 * r]]
+        return [x for v in c for x in [v - 6 * r, v + 6 * r]]
 
     def slice_roi(self, md, extents):
         extents = np.array(extents).flatten().tolist()

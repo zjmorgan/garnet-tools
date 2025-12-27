@@ -520,6 +520,13 @@ class AbsorptionCorrection:
         }
 
     def set_orientation(self):
+        SortPeaksWorkspace(
+            InputWorkspace=self.peaks,
+            OutputWorkspace=self.peaks,
+            ColumnNameToSortBy="RunNumber",
+            SortAscending=False,
+        )
+
         Rs = [peak.getGoniometerMatrix() for peak in mtd[self.peaks]]
         matrix_dict = {}
 
@@ -538,8 +545,8 @@ class AbsorptionCorrection:
                 matrix_dict[matrix_tuple] = run
 
             runs.append(run)
-            peak.setRunNumber(1)
-            peak.setBinCount(run)
+            peak.setBinCount(peak.getRunNumber())
+            peak.setRunNumber(run)
 
         self.runs = np.unique(runs).astype(int).tolist()
         self.Rs = Rs
@@ -568,17 +575,17 @@ class AbsorptionCorrection:
                     mtd["_tmp"].run().getGoniometer().getEulerAngles("YZY")
                 )
 
+                SetSample(
+                    InputWorkspace="_tmp",
+                    Geometry=self.shape_dict,
+                    Material=self.mat_dict,
+                )
+
                 SetGoniometer(
                     Workspace="_tmp",
                     Axis0="{},0,1,0,1".format(omega),
                     Axis1="{},0,0,1,1".format(chi),
                     Axis2="{},0,1,0,1".format(phi),
-                )
-
-                SetSample(
-                    InputWorkspace="_tmp",
-                    Geometry=self.shape_dict,
-                    Material=self.mat_dict,
                 )
 
                 hkl = np.eye(3)
@@ -587,7 +594,7 @@ class AbsorptionCorrection:
                 reciprocal_lattice = np.matmul(R, s)
 
                 shape = mtd["_tmp"].sample().getShape()
-                mesh = shape.getMesh() * 100
+                mesh = shape.getMesh() * 1000
 
                 mesh_polygon = Poly3DCollection(
                     mesh,
@@ -603,9 +610,9 @@ class AbsorptionCorrection:
                 ax.add_collection3d(mesh_polygon)
 
                 ax.set_title("run #{}".format(1 + i))
-                ax.set_xlabel("x [cm]")
-                ax.set_ylabel("y [cm]")
-                ax.set_zlabel("z [cm]")
+                ax.set_xlabel("x [mm]")
+                ax.set_ylabel("y [mm]")
+                ax.set_zlabel("z [mm]")
 
                 ax.set_mesh_axes_equal(mesh)
                 ax.set_box_aspect((1, 1, 1))
@@ -657,7 +664,7 @@ class AbsorptionCorrection:
 
         rho = (n / N) / 0.6022 * M
         m = rho * V * 1000  # mg
-        r = np.cbrt(0.75 * np.pi * V)
+        r = np.cbrt(0.75 * np.pi * V)  # cm
 
         mu_s = n * sigma_s
         mu_a = n * sigma_a
@@ -679,6 +686,7 @@ class AbsorptionCorrection:
             "mass density: {:.4f} g/cm^3\n".format(rho),
             "volume: {:.4f} cm^3\n".format(V),
             "mass: {:.4f} mg\n".format(m),
+            "equivalent-sphere: {:.4f} cm\n".format(r),
         ]
 
         for line in lines:
@@ -703,6 +711,12 @@ class AbsorptionCorrection:
                 OutputWorkspace="_tmp",
             )
 
+            SetSample(
+                InputWorkspace="_tmp",
+                Geometry=self.shape_dict,
+                Material=self.mat_dict,
+            )
+
             R = mtd["_tmp"].getPeak(0).getGoniometerMatrix()
 
             mtd["_tmp"].run().getGoniometer().setR(R)
@@ -717,14 +731,10 @@ class AbsorptionCorrection:
                 Axis2="{},0,1,0,1".format(phi),
             )
 
-            SetSample(
-                InputWorkspace="_tmp",
-                Geometry=self.shape_dict,
-                Material=self.mat_dict,
-            )
-
             AddAbsorptionWeightedPathLengths(
-                InputWorkspace="_tmp", ApplyCorrection=False
+                InputWorkspace="_tmp",
+                ApplyCorrection=True,
+                UseSinglePath=False,
             )
 
             if i == 0:
@@ -748,10 +758,13 @@ class AbsorptionCorrection:
                 mat.totalScatterXSection() + mat.absorbXSection(lamda)
             )
 
+            print("mu = {:4.2f} Tbar = {:4.2f}".format(mu, Tbar))
+
             corr = np.exp(mu * Tbar)
 
-            peak.setIntensity(peak.getIntensity() * corr)
-            peak.setSigmaIntensity(peak.getSigmaIntensity() * corr)
+            # peak.setIntensity(peak.getIntensity() * corr)
+            # peak.setSigmaIntensity(peak.getSigmaIntensity() * corr)
+            peak.setBinCount(corr)
 
 
 class PrunePeaks:
@@ -1640,8 +1653,6 @@ class Peaks:
         log_info = np.all(
             ["peaks_{}".format(item) in run_keys for item in items]
         )
-        print(log_info)
-
         if log_info:
             h = run_info.getLogData("peaks_h").value
             k = run_info.getLogData("peaks_k").value
@@ -1848,7 +1859,7 @@ class Peaks:
 
         # self.renormalize_intensities()
 
-        self.rescale_intensities()
+        # self.rescale_intensities()
 
     def renormalize_intensities(self):
         self.flux_file = (
@@ -2060,6 +2071,8 @@ class Peaks:
         else:
             peaks = self.peaks
             app = ""
+
+        self.rescale_intensities()
 
         filename = os.path.splitext(self.filename)[0] + app
 
@@ -2524,11 +2537,6 @@ def main():
         )
 
     peaks.save_peaks()
-
-    # prune = PrunePeaks("peaks", filename=args.filename)
-
-    # for workspace, parameters in zip(prune.workspaces, prune.parameters):
-    #     peaks.save_peaks(workspace, parameters)
 
 
 if __name__ == "__main__":
