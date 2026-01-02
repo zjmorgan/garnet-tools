@@ -3736,9 +3736,13 @@ class PeakEllipsoid:
         x0 = np.array([I, b, mu, sigma])
 
         invalid = bounds[0] >= x0
+        bounds[0][invalid] = -1e16
+        bounds[1][invalid] = +1e16
         x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
 
         invalid = bounds[1] <= x0
+        bounds[0][invalid] = -1e16
+        bounds[1][invalid] = +1e16
         x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
 
         sol = scipy.optimize.least_squares(
