@@ -3737,8 +3737,11 @@ class PeakEllipsoid:
 
         x0 = np.array([I, b, mu, sigma])
 
-        x0[bounds[0] >= x0] = (bounds[0] + bounds[1]) / 2
-        x0[bounds[1] <= x0] = (bounds[0] + bounds[1]) / 2
+        invalid = bounds[0] >= x0
+        x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
+
+        invalid = bounds[1] <= x0
+        x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
 
         sol = scipy.optimize.least_squares(
             self.profile_cost,
