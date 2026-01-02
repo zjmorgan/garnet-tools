@@ -2,6 +2,7 @@ import os
 import re
 import glob
 import subprocess
+import traceback
 import numpy as np
 
 import scipy.spatial.transform
@@ -776,6 +777,7 @@ class Integration(SubPlan):
             params = ellipsoid.fit(*args)
         except Exception as e:
             print("Exception fitting data: {}".format(e))
+            print(traceback.format_exc())
             return key, value
 
         print(self.status + " 2/2 {:}/{:}".format(key, self.total))
@@ -791,6 +793,7 @@ class Integration(SubPlan):
                 intens, sig = ellipsoid.integrate(*norm_params)
             except Exception as e:
                 print("Exception extracting intensity: {}".format(e))
+                print(traceback.format_exc())
                 return key, value
 
             info = ellipsoid.info
@@ -828,6 +831,7 @@ class Integration(SubPlan):
                 self.peak_plot.save_plot(peak_file)
             except Exception as e:
                 print("Exception saving figure: {}".format(e))
+                print(traceback.format_exc())
                 return key, None
 
             value = intens, sig, shape, [*info, *shape[:3], self.cntrt], hkl
@@ -928,6 +932,7 @@ class Integration(SubPlan):
             params = ellipsoid.fit(*args)
         except Exception as e:
             print("Exception fitting data: {}".format(e))
+            print(traceback.format_exc())
             return key, value
 
         print(self.status + " 2/2 {:}".format(key))
@@ -943,6 +948,7 @@ class Integration(SubPlan):
                 intens, sig = ellipsoid.integrate(*norm_params)
             except Exception as e:
                 print("Exception extracting intensity: {}".format(e))
+                print(traceback.format_exc())
                 return key, value
 
             best_prof = ellipsoid.best_prof
