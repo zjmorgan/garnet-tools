@@ -3712,7 +3712,7 @@ class PeakEllipsoid:
             I = np.nansum(y) * dx0
         if I <= 0:
             I = 1
-        if b >= A:
+        if b >= A or b <= 0:
             b = A / 2
 
         mu = 0
@@ -3732,12 +3732,13 @@ class PeakEllipsoid:
 
         invalid = diff <= 0
 
-        bounds[0][invalid[0]] = -np.inf
-        bounds[1][invalid[0]] = +np.inf
+        bounds[0][invalid[0]] = -1e16
+        bounds[1][invalid[0]] = +1e16
 
         x0 = np.array([I, b, mu, sigma])
 
-        x0[np.isinf(x0)] = 0
+        x0[bounds[0] >= x0] = (bounds[0] + bounds[1]) / 2
+        x0[bounds[1] <= x0] = (bounds[0] + bounds[1]) / 2
 
         sol = scipy.optimize.least_squares(
             self.profile_cost,
