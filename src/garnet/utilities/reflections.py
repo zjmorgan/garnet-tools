@@ -1704,13 +1704,15 @@ class Peaks:
         ax.set_ylabel("Count rate")
         fig.savefig(filename + "_rate.pdf")
 
-        # for peak in mtd[self.peaks]:
-        #     run = int(peak.getRunNumber())
-        #     scale = rate_dict.get(run)
-        #     if scale is None:
-        #         scale = 0
-        #     peak.setIntensity(scale * peak.getIntensity())
-        #     peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
+        for peak in mtd[self.peaks]:
+            run = int(peak.getRunNumber())
+            rate = rate_dict.get(run)
+            if rate is None:
+                scale = 0
+            else:
+                scale = 1 / rate
+            peak.setIntensity(scale * peak.getIntensity())
+            peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         self.info_dict = info_dict
         self.norm_dict = norm_dict

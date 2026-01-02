@@ -126,7 +126,7 @@ def test_peak_plot():
 
     Q0 = np.array([Q0_x, Q0_y, Q0_z])
 
-    signal = np.random.multivariate_normal(Q0, cov, size=1000000)
+    signal = np.random.multivariate_normal(Q0, cov, size=1000)
 
     counts, bins = np.histogramdd(
         signal,

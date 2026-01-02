@@ -23,7 +23,7 @@ from mantid.kernel import Atom, MaterialBuilder, V3D
 
 
 class NuclearStructureRefinement:
-    def __init__(self, cell, space_group, sites, filename, l_max=4):
+    def __init__(self, cell, space_group, sites, filename, l_max=8):
         self.sites = []
         for site in sites:
             atm, x, y, z, occ, U = site
@@ -473,6 +473,8 @@ class NuclearStructureRefinement:
         lamdas, two_thetas, intensity, sigma = [], [], [], []
         h, k, l, fs = [], [], [], []
 
+        coverage_two_theta, coverage_az_phi = [], []
+
         d_min = np.inf
         for peak in mtd["peaks"]:
             hkl = peak.getIntHKL()
@@ -486,16 +488,15 @@ class NuclearStructureRefinement:
             ri = peak.getSourceDirectionSampleFrame()
             sf = peak.getDetectorDirectionSampleFrame()
 
-            theta_ri = np.arccos(np.clip(ri[2], -1.0, 1.0))
-            phi_ri = np.arctan2(ri[1], ri[0])
+            two_theta_ri = np.arccos(np.clip(ri[2], -1.0, 1.0))
+            az_phi_ri = np.arctan2(ri[1], ri[0])
 
-            theta_sf = np.arccos(np.clip(sf[2], -1.0, 1.0))
-            phi_sf = np.arctan2(sf[1], sf[0])
+            two_theta_sf = np.arccos(np.clip(sf[2], -1.0, 1.0))
+            az_phi_sf = np.arctan2(sf[1], sf[0])
 
-            ri = self.feature_vector(theta_ri, phi_ri, self.l_max)
-            sf = self.feature_vector(theta_sf, phi_sf, self.l_max)
-
-            f = 0.5 * (ri + sf)
+            ri_vec = self.feature_vector(two_theta_ri, az_phi_ri, self.l_max)
+            sf_vec = self.feature_vector(two_theta_sf, az_phi_sf, self.l_max)
+            f = 0.5 * (ri_vec + sf_vec)
 
             I = peak.getIntensity()
             sig = peak.getSigmaIntensity()
@@ -509,9 +510,12 @@ class NuclearStructureRefinement:
                 l.append(hkl[2])
 
                 intensity.append(I)
-                sigma.append(np.sqrt(sig + 0.01 * I**2))
+                sigma.append(sig)
 
                 fs.append(f)
+
+                coverage_two_theta.extend([two_theta_ri, two_theta_sf])
+                coverage_az_phi.extend([az_phi_ri, az_phi_sf])
 
         scale_factor = 10000 / np.nanpercentile(intensity, 99)
 
@@ -528,6 +532,10 @@ class NuclearStructureRefinement:
 
         self.hkls = hkls[mask]
 
+        self.equiv, self.inverse, self.counts = np.unique(
+            self.hkls, return_inverse=True, return_counts=True, axis=0
+        )
+
         self.I_obs = np.array(intensity)[mask] * scale_factor
         self.sig = np.array(sigma)[mask] * scale_factor
 
@@ -536,6 +544,9 @@ class NuclearStructureRefinement:
         self.Tbar = np.zeros_like(lamdas)[mask]
 
         self.fs = np.array(fs)[mask]
+
+        self.two_theta_coverage = np.asarray(coverage_two_theta, float)
+        self.az_phi_coverage = np.asarray(coverage_az_phi, float)
 
     def initialize_crystal_structure(self, sites):
         cell_params = " ".join(6 * ["{}"]).format(*self.cell)
@@ -576,7 +587,7 @@ class NuclearStructureRefinement:
 
             xyz = np.einsum("ijk,k->ij", transform, [x, y, z, 1])
 
-            pf = np.exp(2j * np.pi * np.einsum("ij,kj->ik", xyz, self.hkls))
+            pf = np.exp(2j * np.pi * np.einsum("ij,kj->ik", xyz, self.equiv))
 
             beta11 = params[variable.format("beta11")].value
             beta22 = params[variable.format("beta22")].value
@@ -592,12 +603,12 @@ class NuclearStructureRefinement:
             )
 
             h2 = [
-                self.hkls[:, 0] ** 2,
-                self.hkls[:, 1] ** 2,
-                self.hkls[:, 2] ** 2,
-                2 * self.hkls[:, 1] * self.hkls[:, 2],
-                2 * self.hkls[:, 0] * self.hkls[:, 2],
-                2 * self.hkls[:, 0] * self.hkls[:, 1],
+                self.equiv[:, 0] ** 2,
+                self.equiv[:, 1] ** 2,
+                self.equiv[:, 2] ** 2,
+                2 * self.equiv[:, 1] * self.equiv[:, 2],
+                2 * self.equiv[:, 0] * self.equiv[:, 2],
+                2 * self.equiv[:, 0] * self.equiv[:, 1],
             ]
 
             T = np.clip(np.exp(-np.einsum("ij,jk->ik", beta, h2)), 0, 1)
@@ -606,204 +617,7 @@ class NuclearStructureRefinement:
 
             Fs += np.sum(b * occ * pf * T, axis=0)
 
-        return (Fs * Fs.conj()).real
-
-    def cost(self, params, F2s, I_obs, sig):
-        s = params["scale"].value
-
-        I_calc = s * F2s
-
-        return (I_calc - I_obs) / sig
-
-    def calculate_scale_factor(self, F2s):
-        num = np.nansum(F2s * self.I_obs / self.sig**2)
-        den = np.nansum(F2s**2 / self.sig**2)
-        s = num / den
-
-        params = Parameters()
-
-        params.add("scale", value=s, min=0, max=np.inf)
-
-        out = Minimizer(
-            self.cost,
-            params,
-            fcn_args=(F2s, self.I_obs, self.sig),
-            nan_policy="omit",
-        )
-
-        result = out.minimize(method="least_squares", loss="soft_l1")
-
-        scale = result.params["scale"].value
-
-        return scale
-
-    def objective_structure(self, params):
-        """Objective for structure + scale refinement.
-
-        This stage varies positional, occupancy and displacement
-        parameters together with the overall scale, while using the
-        current absorption/extinction parameters as fixed values.
-        """
-
-        sites, param, scale, coeffs = self.extract_parameters(params)
-
-        F2s = self.calculate_structure_factors(params)
-
-        I_calc = F2s * self.y
-
-        return (scale * I_calc - self.I_obs) / self.sig
-
-    def objective_correction(self, params):
-        """Objective for absorption/extinction refinement.
-
-        Structure and scale are held fixed; F2s are precomputed for the
-        current structural model.
-        """
-
-        sites, param, scale, coeffs = self.extract_parameters(params)
-
-        y_abs = self.absorption_correction(coeffs)
-        y_ext = self.extinction_correction(param, self.F2s)
-        y = y_abs * y_ext
-
-        I_calc = self.F2s * y
-
-        wr = (scale * I_calc - self.I_obs) / self.sig
-
-        return np.concatenate((wr, self.T - 1))
-
-    def refine(self, R=1, l_max=4, report=True, cutoff=3, n_iter=3):
-        self.R = R
-        self.l_max = l_max
-
-        self.initialize_correction(R)
-
-        fixed = []
-        for name, par in self.params.items():
-            if par.vary == False:
-                fixed.append(name)
-
-        for i in range(n_iter):
-            self.F2s = self.calculate_structure_factors(self.params)
-            _, param, _, coeffs = self.extract_parameters(self.params)
-            y_abs = self.absorption_correction(coeffs)
-            y_ext = self.extinction_correction(param, self.F2s)
-            self.y = y_abs * y_ext
-
-            # --- Stage 1: structure + scale, fixed absorption/extinction
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("coeff_") or name == "param":
-                    par.vary = False
-                elif name not in fixed:
-                    par.vary = True
-
-            out = Minimizer(
-                self.objective_structure,
-                params,
-                nan_policy="omit",
-                reduce_fcn="neglogentropy",
-            )
-
-            result = out.minimize(method="leastsq")
-
-            if report:
-                print(
-                    f"Iteration {i + 1}/{n_iter} - "
-                    "Stage 1 (structure + scale)"
-                )
-                print(fit_report(result))
-
-            self.params = result.params
-
-            self.F2s = self.calculate_structure_factors(self.params)
-
-            # --- Stage 2: absorption/extinction only
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("coeff_") or name in ["scale", "param"]:
-                    par.vary = True
-                else:
-                    par.vary = False
-
-            out = Minimizer(
-                self.objective_correction,
-                params,
-                nan_policy="omit",
-                reduce_fcn="neglogentropy",
-            )
-
-            result = out.minimize(method="leastsq")
-
-            if report:
-                print(
-                    f"Iteration {i + 1}/{n_iter} - "
-                    "Stage 2 (absorption/extinction)"
-                )
-                print(fit_report(result))
-
-            self.params = result.params
-
-        params = self.extract_parameters(self.params)
-
-        self.sites, self.param, self.scale, self.coeffs = params
-
-        F2s = self.calculate_structure_factors(self.params)
-
-        y_abs = self.absorption_correction(self.coeffs)
-        y_ext = self.extinction_correction(self.param, F2s)
-
-        y = y_abs * y_ext
-
-        I_calc = F2s * y
-
-        scale = self.calculate_scale_factor(I_calc)
-
-        self.I_calc = scale * I_calc
-
-        F_obs = np.sqrt(self.I_obs / scale)
-        F_calc = np.sqrt(self.I_calc / scale)
-        F_sig = 0.5 * self.sig / np.sqrt(self.I_obs * scale)
-
-        mask = np.abs(F_calc - F_obs) < cutoff * F_sig
-
-        self.F_obs = F_obs[mask]
-        self.F_calc = F_calc[mask]
-        self.F_sig = F_sig[mask]
-
-        self.R_ref = (
-            100
-            * np.nansum(np.abs(self.F_calc - self.F_obs))
-            / np.nansum(self.F_obs)
-        )
-
-        print("R = {:.2f}%".format(self.R_ref))
-
-    def plot_result(self):
-        output = os.path.splitext(self.filename)[0]
-
-        F_lim = [np.min(self.F_obs), np.max(self.F_obs)]
-
-        fig, ax = plt.subplots(1, 1, layout="constrained")
-        ax.plot(F_lim, F_lim, color="C1")
-        ax.errorbar(
-            self.F_obs,
-            self.F_calc,
-            xerr=self.F_sig * 0,
-            fmt=",",
-            color="C0",
-            rasterized=True,
-        )
-        chemical_formula = self.chemical_formula.replace("-", " ")
-        R = self.R_ref
-        ax.set_aspect(1)
-        ax.minorticks_on()
-        ax.set_xlim(*F_lim)
-        ax.set_ylim(*F_lim)
-        ax.set_title(r"{} | $R = {:.2f}\%$".format(chemical_formula, R))
-        ax.set_xlabel(r"$|F|_\mathrm{obs}$")
-        ax.set_ylabel(r"$|F|_\mathrm{calc}$")
-        fig.savefig(output + "_ref.pdf", bbox_inches="tight")
+        return (Fs * Fs.conj())[self.inverse].real
 
     def plot_sample_shape(
         self,
@@ -811,30 +625,31 @@ class NuclearStructureRefinement:
         n_phi=40,
         elev=20,
         azim=30,
+        coverage_angle_deg=1.0,
     ):
         R = self.R
         coeffs = self.coeffs
 
-        theta = np.linspace(0, np.pi, n_theta)
-        phi = np.linspace(0, 2 * np.pi, n_phi)
-        theta, phi = np.meshgrid(theta, phi)
+        two_theta = np.linspace(0, np.pi, n_theta)
+        az_phi = np.linspace(0, 2 * np.pi, n_phi)
+        two_theta, az_phi = np.meshgrid(two_theta, az_phi)
 
-        x = R * np.sin(theta) * np.cos(phi)
-        y = R * np.sin(theta) * np.sin(phi)
-        z = R * np.cos(theta)
+        x = R * np.sin(two_theta) * np.cos(az_phi)
+        y = R * np.sin(two_theta) * np.sin(az_phi)
+        z = R * np.cos(two_theta)
 
         coeffs = np.asarray(coeffs, float)
-        th_flat = theta.ravel()
-        ph_flat = phi.ravel()
+        tt_flat = two_theta.ravel()
+        az_flat = az_phi.ravel()
         feats = np.array(
             [
-                self.feature_vector(th, ph, self.l_max)
-                for th, ph in zip(th_flat, ph_flat)
+                self.feature_vector(tt, az, self.l_max)
+                for tt, az in zip(tt_flat, az_flat)
             ]
         )
         A_ani = 1.0 + feats @ coeffs
         A_ani = np.clip(
-            A_ani.reshape(theta.shape),
+            A_ani.reshape(two_theta.shape),
             np.finfo(float).eps,
             np.finfo(float).max,
         )
@@ -846,25 +661,60 @@ class NuclearStructureRefinement:
         mu = n * (sigma_tot + sigma_abs)
 
         muR = mu * R / 10.0
-        A_iso = self.spherical_absorption_correction(muR, theta)
+        A_iso = self.spherical_absorption_correction(muR, two_theta)
 
         T_dir = A_iso / A_ani
+
+        T_plot = T_dir.copy()
+
+        two_theta_cov = getattr(self, "two_theta_coverage", None)
+        az_phi_cov = getattr(self, "az_phi_coverage", None)
+
+        if (
+            two_theta_cov is not None
+            and az_phi_cov is not None
+            and two_theta_cov.size
+        ):
+            ux = x / R
+            uy = y / R
+            uz = z / R
+            grid_dirs = np.stack([ux.ravel(), uy.ravel(), uz.ravel()], axis=1)
+
+            cx = np.sin(two_theta_cov) * np.cos(az_phi_cov)
+            cy = np.sin(two_theta_cov) * np.sin(az_phi_cov)
+            cz = np.cos(two_theta_cov)
+            cov_dirs = np.stack([cx, cy, cz], axis=1)
+
+            cosang = cov_dirs @ grid_dirs.T
+            max_cos = np.max(cosang, axis=0)
+
+            min_cos = np.cos(np.deg2rad(coverage_angle_deg))
+            covered = (max_cos >= min_cos).reshape(two_theta.shape)
+
+            T_plot[~covered] = np.nan
 
         fig = plt.figure(layout="constrained")
         gs = fig.add_gridspec(2, 2, hspace=0.15, wspace=0.15)
 
         ax3d = fig.add_subplot(gs[0, 0], projection="3d")
-        ax_xy = fig.add_subplot(gs[0, 1], projection="3d")
-        ax_xz = fig.add_subplot(gs[1, 0], projection="3d")
-        ax_yz = fig.add_subplot(gs[1, 1], projection="3d")
+        ax_xy = fig.add_subplot(gs[0, 1])
+        ax_xz = fig.add_subplot(gs[1, 0])
+        ax_yz = fig.add_subplot(gs[1, 1])
 
-        norm = Normalize(vmin=np.min(T_dir), vmax=np.max(T_dir))
+        if np.isfinite(T_plot).any():
+            vmin = np.nanmin(T_plot)
+            vmax = np.nanmax(T_plot)
+        else:
+            vmin = np.min(T_dir)
+            vmax = np.max(T_dir)
+
+        norm = Normalize(vmin=vmin, vmax=vmax)
         cmap = plt.cm.viridis
-        facecolors = cmap(norm(T_dir))
+        facecolors = cmap(norm(T_plot))
         ax3d.plot_surface(
-            x,
-            y,
-            z,
+            x,  # horizontal axis: x
+            z,  # depth axis: z
+            y,  # vertical axis: y
             rstride=1,
             cstride=1,
             facecolors=facecolors,
@@ -872,44 +722,35 @@ class NuclearStructureRefinement:
             antialiased=False,
         )
 
-        ax_xy.plot_surface(
+        ax_xy.pcolormesh(
             x,
             y,
-            z,
-            rstride=1,
-            cstride=1,
-            facecolors=facecolors,
-            linewidth=0,
-            antialiased=False,
+            T_plot,
+            shading="auto",
+            cmap=cmap,
+            norm=norm,
         )
-        ax_xy.view_init(90, -90)
 
-        ax_xz.plot_surface(
+        ax_xz.pcolormesh(
             x,
-            y,
             z,
-            rstride=1,
-            cstride=1,
-            facecolors=facecolors,
-            linewidth=0,
-            antialiased=False,
+            T_plot,
+            shading="auto",
+            cmap=cmap,
+            norm=norm,
         )
-        ax_xz.view_init(0, -90)
 
-        ax_yz.plot_surface(
-            x,
-            y,
+        ax_yz.pcolormesh(
             z,
-            rstride=1,
-            cstride=1,
-            facecolors=facecolors,
-            linewidth=0,
-            antialiased=False,
+            y,
+            T_plot,
+            shading="auto",
+            cmap=cmap,
+            norm=norm,
         )
-        ax_yz.view_init(0, 0)
 
         mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-        mappable.set_array(T_dir)
+        mappable.set_array(T_plot)
         fig.colorbar(
             mappable,
             ax=[ax3d, ax_xy, ax_xz, ax_yz],
@@ -918,15 +759,32 @@ class NuclearStructureRefinement:
         )
 
         lim = 1.1 * R
-        for ax in (ax3d, ax_xy, ax_xz, ax_yz):
-            ax.set_xlim(-lim, lim)
-            ax.set_ylim(-lim, lim)
-            ax.set_zlim(-lim, lim)
-            ax.set_xlabel(r"$x$ [mm]")
-            ax.set_ylabel(r"$y$ [mm]")
-            ax.set_zlabel(r"$z$ [mm]")
-            ax.set_box_aspect([1, 1, 1])
-            ax.set_aspect("equal")
+        ax3d.set_xlim(-lim, lim)
+        ax3d.set_ylim(-lim, lim)
+        ax3d.set_zlim(-lim, lim)
+        ax3d.set_xlabel(r"$x$ [mm]")
+        ax3d.set_ylabel(r"$z$ [mm]")
+        ax3d.set_zlabel(r"$y$ [mm]")
+        ax3d.set_box_aspect([1, 1, 1])
+        ax3d.set_aspect("equal")
+
+        ax_xy.set_xlim(-lim, lim)
+        ax_xy.set_ylim(-lim, lim)
+        ax_xy.set_xlabel(r"$x$ [mm]")
+        ax_xy.set_ylabel(r"$y$ [mm]")
+        ax_xy.set_aspect("equal")
+
+        ax_xz.set_xlim(-lim, lim)
+        ax_xz.set_ylim(-lim, lim)
+        ax_xz.set_xlabel(r"$x$ [mm]")
+        ax_xz.set_ylabel(r"$z$ [mm]")
+        ax_xz.set_aspect("equal")
+
+        ax_yz.set_xlim(-lim, lim)
+        ax_yz.set_ylim(-lim, lim)
+        ax_yz.set_xlabel(r"$z$ [mm]")
+        ax_yz.set_ylabel(r"$y$ [mm]")
+        ax_yz.set_aspect("equal")
 
         ax3d.view_init(elev=elev, azim=azim)
 
@@ -1086,10 +944,232 @@ class NuclearStructureRefinement:
             ys = 1 / (1 + self.c1 * xs**self.c2)
             return ys
 
+    def cost(self, params, F2s, I_obs, sig):
+        s = params["scale"].value
+
+        I_calc = s * F2s
+
+        return (I_calc - I_obs) / sig
+
+    def calculate_scale_factor(self, F2s):
+        num = np.nansum(F2s * self.I_obs / self.sig**2)
+        den = np.nansum(F2s**2 / self.sig**2)
+        s = num / den
+
+        params = Parameters()
+
+        params.add("scale", value=s, min=0, max=np.inf)
+
+        out = Minimizer(
+            self.cost,
+            params,
+            fcn_args=(F2s, self.I_obs, self.sig),
+            nan_policy="omit",
+        )
+
+        result = out.minimize(method="least_squares", loss="soft_l1")
+
+        scale = result.params["scale"].value
+
+        return scale
+
+    def objective_structure(self, params):
+        """Objective for structure + scale refinement.
+
+        This stage varies positional, occupancy and displacement
+        parameters together with the overall scale, while using the
+        current absorption/extinction parameters as fixed values.
+        """
+
+        sites, param, scale, coeffs = self.extract_parameters(params)
+
+        F2s = self.calculate_structure_factors(params)
+
+        I_calc = F2s * self.y
+
+        return (scale * I_calc - self.I_obs) / self.sig
+
+    def objective_correction(self, params):
+        """Objective for absorption/extinction refinement.
+
+        Structure and scale are held fixed; F2s are precomputed for the
+        current structural model.
+        """
+
+        sites, param, scale, coeffs = self.extract_parameters(params)
+
+        y_abs = self.absorption_correction(coeffs)
+        y_ext = self.extinction_correction(param, self.F2s)
+        y = y_abs * y_ext
+
+        I_calc = self.F2s * y
+
+        wr = (scale * I_calc - self.I_obs) / self.sig
+
+        return np.concatenate((wr, self.T - 1))
+
+    def refine(self, R=1, report=True, cutoff=10, n_iter=3):
+        self.R = R
+
+        self.initialize_correction(R)
+
+        fixed = []
+        for name, par in self.params.items():
+            if par.vary == False:
+                fixed.append(name)
+
+        for i in range(n_iter):
+            self.F2s = self.calculate_structure_factors(self.params)
+            _, param, _, coeffs = self.extract_parameters(self.params)
+            y_abs = self.absorption_correction(coeffs)
+            y_ext = self.extinction_correction(param, self.F2s)
+            self.y = y_abs * y_ext
+
+            # --- Stage 1: structure + scale, fixed absorption/extinction
+            params = self.params.copy()
+            for name, par in params.items():
+                if name.startswith("coeff_") or name == "param":
+                    par.vary = False
+                elif name not in fixed:
+                    par.vary = True
+
+            out = Minimizer(
+                self.objective_structure,
+                params,
+                nan_policy="omit",
+                reduce_fcn=None,
+            )
+
+            result = out.minimize(method="leastsq")
+
+            if report:
+                print(
+                    f"Iteration {i + 1}/{n_iter} - "
+                    "Stage 1 (structure + scale)"
+                )
+                print(fit_report(result))
+
+            self.params = result.params
+
+            self.F2s = self.calculate_structure_factors(self.params)
+
+            # --- Stage 2: absorption/extinction only
+            params = self.params.copy()
+            for name, par in params.items():
+                if name.startswith("coeff_") or name == "param":
+                    par.vary = True
+                else:
+                    par.vary = False
+
+            out = Minimizer(
+                self.objective_correction,
+                params,
+                nan_policy="omit",
+                reduce_fcn=None,
+            )
+
+            result = out.minimize(method="leastsq")
+
+            if report:
+                print(
+                    f"Iteration {i + 1}/{n_iter} - "
+                    "Stage 2 (absorption/extinction)"
+                )
+                print(fit_report(result))
+
+            self.params = result.params
+
+        params = self.extract_parameters(self.params)
+
+        self.sites, self.param, self.scale, self.coeffs = params
+
+        F2s = self.calculate_structure_factors(self.params)
+
+        y_abs = self.absorption_correction(self.coeffs)
+        y_ext = self.extinction_correction(self.param, F2s)
+
+        y = y_abs * y_ext
+
+        I_calc = F2s * y
+
+        scale = self.calculate_scale_factor(I_calc)
+
+        self.I_calc = scale * I_calc
+
+        F_obs = np.sqrt(self.I_obs / scale)
+        F_calc = np.sqrt(self.I_calc / scale)
+        F_sig = 0.5 * self.sig / np.sqrt(self.I_obs * scale)
+
+        # F2_obs = self.I_obs / (scale * y)
+        # F2_sig = self.sig / (scale * y)
+        # F2_calc = F2s.copy()
+
+        mask = np.abs(F_calc - F_obs) < cutoff * F_sig
+
+        w = np.bincount(self.inverse[mask], weights=1 / F_sig[mask] ** 2)
+
+        F_obs = (
+            np.bincount(
+                self.inverse[mask], weights=F_obs[mask] / F_sig[mask] ** 2
+            )
+            / w
+        )
+        F_calc = (
+            np.bincount(
+                self.inverse[mask], weights=F_calc[mask] / F_sig[mask] ** 2
+            )
+            / w
+        )
+        F_sig = 1 / np.sqrt(w)
+
+        # F_obs = np.sqrt(F2_obs)
+        # F_calc = np.sqrt(F2_calc)
+        # F_sig = 0.5 * F2_sig / np.sqrt(F2_obs)
+
+        mask = np.abs(F_calc - F_obs) < cutoff * F_sig
+
+        self.F_obs = F_obs[mask]
+        self.F_calc = F_calc[mask]
+        self.F_sig = F_sig[mask]
+
+        self.R_ref = (
+            100
+            * np.nansum(np.abs(self.F_calc - self.F_obs))
+            / np.nansum(self.F_obs)
+        )
+
+        print("R = {:.2f}%".format(self.R_ref))
+
+    def plot_result(self):
+        output = os.path.splitext(self.filename)[0]
+
+        F_lim = [np.min(self.F_obs), np.max(self.F_obs)]
+
+        fig, ax = plt.subplots(1, 1, layout="constrained")
+        ax.plot(F_lim, F_lim, color="C1")
+        ax.errorbar(
+            self.F_calc,
+            self.F_obs,
+            yerr=self.F_sig,
+            fmt=".",
+            color="C0",
+            rasterized=True,
+        )
+        chemical_formula = self.chemical_formula.replace("-", " ")
+        R = self.R_ref
+        ax.set_aspect(1)
+        ax.minorticks_on()
+        ax.set_xlim(*F_lim)
+        ax.set_ylim(*F_lim)
+        ax.set_title(r"{} | $R = {:.2f}\%$".format(chemical_formula, R))
+        ax.set_xlabel(r"$|F|_\mathrm{calc}$")
+        ax.set_ylabel(r"$|F|_\mathrm{obs}$")
+        fig.savefig(output + "_ref.pdf", bbox_inches="tight")
+
 
 # ---
 
-filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+# filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
 filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
 
 cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
@@ -1101,7 +1181,18 @@ sites = [
     ["O", -0.03, 0.05, 0.149, 1, 0.0023],
 ]
 
+
+# filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
+
+# cell = [4.516, 4.516, 8.107, 90, 90, 120]
+# space_group = "P 63/m m c"
+# sites = [
+#     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
+#     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
+#     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
+# ]
+
 nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-nuclear.refine(R=1)
+nuclear.refine(R=0.1, n_iter=1)
 nuclear.plot_result()
 nuclear.plot_sample_shape()

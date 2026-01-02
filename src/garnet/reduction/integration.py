@@ -2456,21 +2456,9 @@ class PeakEllipsoid:
 
         return -0.5 * g * np.array([g0, g1, g2])
 
-    def residual_1d(self, params, x0, x1, x2, ys, es):
+    def residual_1d(self, params, x0, x1, x2, ys, es, c, inv_S):
         y0, y1, y2 = ys
         e0, e1, e2 = es
-
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
 
         A0 = params["A1d_0"]
         A1 = params["A1d_1"]
@@ -2479,10 +2467,6 @@ class PeakEllipsoid:
         B0 = params["B1d_0"]
         B1 = params["B1d_1"]
         B2 = params["B1d_2"]
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2516,23 +2500,11 @@ class PeakEllipsoid:
 
         return diff[mask]
 
-    def jacobian_1d(self, params, x0, x1, x2, ys, es):
+    def jacobian_1d(self, params, x0, x1, x2, ys, es, c, inv_S, dr, du):
         params_list = [name for name, par in params.items()]
 
         y0, y1, y2 = ys
         e0, e1, e2 = es
-
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
 
         A0 = params["A1d_0"]
         A1 = params["A1d_1"]
@@ -2541,10 +2513,6 @@ class PeakEllipsoid:
         # B0 = params["B1d_0"]
         # B1 = params["B1d_1"]
         # B2 = params["B1d_2"]
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2567,9 +2535,6 @@ class PeakEllipsoid:
         dc0_0, dc1_0, dc2_0 = (A0 * yc0_gauss) / e0
         dc0_1, dc1_1, dc2_1 = (A1 * yc1_gauss) / e1
         dc0_2, dc1_2, dc2_2 = (A2 * yc2_gauss) / e2
-
-        dr = self.inv_S_deriv_r(r0, r1, r2, u0, u1, u2)
-        du = self.inv_S_deriv_u(r0, r1, r2, u0, u1, u2)
 
         yr0_gauss = self.gaussian_jac_S(x0, x1, x2, c, inv_S, dr, mode="1d_0")
         yr1_gauss = self.gaussian_jac_S(x0, x1, x2, c, inv_S, dr, mode="1d_1")
@@ -2640,21 +2605,9 @@ class PeakEllipsoid:
 
         return jac[ind][:, mask]
 
-    def residual_2d(self, params, x0, x1, x2, ys, es):
+    def residual_2d(self, params, x0, x1, x2, ys, es, c, inv_S):
         y0, y1, y2 = ys
         e0, e1, e2 = es
-
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
 
         A0 = params["A2d_0"]
         A1 = params["A2d_1"]
@@ -2663,10 +2616,6 @@ class PeakEllipsoid:
         B0 = params["B2d_0"]
         B1 = params["B2d_1"]
         B2 = params["B2d_2"]
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2700,23 +2649,11 @@ class PeakEllipsoid:
 
         return diff[mask]
 
-    def jacobian_2d(self, params, x0, x1, x2, ys, es):
+    def jacobian_2d(self, params, x0, x1, x2, ys, es, c, inv_S, dr, du):
         params_list = [name for name, par in params.items()]
 
         y0, y1, y2 = ys
         e0, e1, e2 = es
-
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
 
         A0 = params["A2d_0"]
         A1 = params["A2d_1"]
@@ -2725,10 +2662,6 @@ class PeakEllipsoid:
         # B0 = params["B2d_0"]
         # B1 = params["B2d_1"]
         # B2 = params["B2d_2"]
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2751,9 +2684,6 @@ class PeakEllipsoid:
         dc0_0, dc1_0, dc2_0 = (A0 * yc0_gauss) / e0
         dc0_1, dc1_1, dc2_1 = (A1 * yc1_gauss) / e1
         dc0_2, dc1_2, dc2_2 = (A2 * yc2_gauss) / e2
-
-        dr = self.inv_S_deriv_r(r0, r1, r2, u0, u1, u2)
-        du = self.inv_S_deriv_u(r0, r1, r2, u0, u1, u2)
 
         yr0_gauss = self.gaussian_jac_S(x0, x1, x2, c, inv_S, dr, mode="2d_0")
         yr1_gauss = self.gaussian_jac_S(x0, x1, x2, c, inv_S, dr, mode="2d_1")
@@ -2824,25 +2754,9 @@ class PeakEllipsoid:
 
         return jac[ind][:, mask]
 
-    def residual_3d(self, params, x0, x1, x2, y, e):
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
-
+    def residual_3d(self, params, x0, x1, x2, y, e, c, inv_S):
         A = params["A3d"]
         B = params["B3d"]
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2864,27 +2778,11 @@ class PeakEllipsoid:
 
         return diff[mask]
 
-    def jacobian_3d(self, params, x0, x1, x2, y, e):
+    def jacobian_3d(self, params, x0, x1, x2, y, e, c, inv_S, dr, du):
         params_list = [name for name, par in params.items()]
-
-        c0 = params["c0"]
-        c1 = params["c1"]
-        c2 = params["c2"]
-
-        r0 = params["r0"]
-        r1 = params["r1"]
-        r2 = params["r2"]
-
-        u0 = params["u0"]
-        u1 = params["u1"]
-        u2 = params["u2"]
 
         A = params["A3d"]
         # B = params['B3d']
-
-        c, inv_S = self.centroid_inverse_covariance(
-            c0, c1, c2, r0, r1, r2, u0, u1, u2
-        )
 
         args = x0, x1, x2, c, inv_S
 
@@ -2897,9 +2795,6 @@ class PeakEllipsoid:
         yc_gauss = self.gaussian_jac_c(x0, x1, x2, c, inv_S, mode="3d")
 
         dc0, dc1, dc2 = (A * yc_gauss) / e
-
-        dr = self.inv_S_deriv_r(r0, r1, r2, u0, u1, u2)
-        du = self.inv_S_deriv_u(r0, r1, r2, u0, u1, u2)
 
         yr_gauss = self.gaussian_jac_S(x0, x1, x2, c, inv_S, dr, mode="3d")
 
@@ -2933,9 +2828,26 @@ class PeakEllipsoid:
         return jac[ind][:, mask]
 
     def residual(self, params, args_1d, args_2d, args_3d):
-        cost_1d = self.residual_1d(params, *args_1d)
-        cost_2d = self.residual_2d(params, *args_2d)
-        cost_3d = self.residual_3d(params, *args_3d)
+        # Compute centroid and inverse covariance once per evaluation.
+        c0 = params["c0"].value
+        c1 = params["c1"].value
+        c2 = params["c2"].value
+
+        r0 = params["r0"].value
+        r1 = params["r1"].value
+        r2 = params["r2"].value
+
+        u0 = params["u0"].value
+        u1 = params["u1"].value
+        u2 = params["u2"].value
+
+        c, inv_S = self.centroid_inverse_covariance(
+            c0, c1, c2, r0, r1, r2, u0, u1, u2
+        )
+
+        cost_1d = self.residual_1d(params, *args_1d, c, inv_S)
+        cost_2d = self.residual_2d(params, *args_2d, c, inv_S)
+        cost_3d = self.residual_3d(params, *args_3d, c, inv_S)
 
         cost = np.concatenate([cost_1d, cost_2d, cost_3d])
         cost = np.nan_to_num(cost, nan=0.0, posinf=1e16, neginf=-1e16)
@@ -2943,9 +2855,29 @@ class PeakEllipsoid:
         return cost
 
     def jacobian(self, params, args_1d, args_2d, args_3d):
-        jac_1d = self.jacobian_1d(params, *args_1d)
-        jac_2d = self.jacobian_2d(params, *args_2d)
-        jac_3d = self.jacobian_3d(params, *args_3d)
+        # Shared geometry (centroid, covariance and derivatives).
+        c0 = params["c0"].value
+        c1 = params["c1"].value
+        c2 = params["c2"].value
+
+        r0 = params["r0"].value
+        r1 = params["r1"].value
+        r2 = params["r2"].value
+
+        u0 = params["u0"].value
+        u1 = params["u1"].value
+        u2 = params["u2"].value
+
+        c, inv_S = self.centroid_inverse_covariance(
+            c0, c1, c2, r0, r1, r2, u0, u1, u2
+        )
+
+        dr = self.inv_S_deriv_r(r0, r1, r2, u0, u1, u2)
+        du = self.inv_S_deriv_u(r0, r1, r2, u0, u1, u2)
+
+        jac_1d = self.jacobian_1d(params, *args_1d, c, inv_S, dr, du)
+        jac_2d = self.jacobian_2d(params, *args_2d, c, inv_S, dr, du)
+        jac_3d = self.jacobian_3d(params, *args_3d, c, inv_S, dr, du)
 
         jac = np.column_stack([jac_1d, jac_2d, jac_3d])
         jac = np.nan_to_num(jac, nan=0.0, posinf=1e16, neginf=-1e16)
@@ -3232,7 +3164,7 @@ class PeakEllipsoid:
         result = out.minimize(
             method="least_squares",
             jac=self.jacobian,
-            max_nfev=50,
+            max_nfev=10,
         )
 
         if report_fit:
@@ -3266,7 +3198,7 @@ class PeakEllipsoid:
         result = out.minimize(
             method="least_squares",
             jac=self.jacobian,
-            max_nfev=50,
+            max_nfev=10,
         )
 
         if report_fit:
@@ -3302,7 +3234,7 @@ class PeakEllipsoid:
         result = out.minimize(
             method="least_squares",
             jac=self.jacobian,
-            max_nfev=50,
+            max_nfev=10,
         )
 
         if report_fit:
@@ -3403,7 +3335,7 @@ class PeakEllipsoid:
         result = out.minimize(
             method="least_squares",
             jac=self.jacobian,
-            max_nfev=50,
+            max_nfev=10,
         )
 
         if report_fit:
@@ -3536,7 +3468,7 @@ class PeakEllipsoid:
 
         return c0, c1, c2, r0, r1, r2, v0, v1, v2
 
-    def peak_roi(self, x0, x1, x2, c, S, det_mask, p=0.997):
+    def peak_roi(self, x0, x1, x2, c, S, scale, p=0.997):
         c0, c1, c2 = c
 
         dx0, dx1, dx2 = self.voxels(x0, x1, x2)
@@ -3566,7 +3498,15 @@ class PeakEllipsoid:
 
         mask = scipy.ndimage.binary_dilation(pk, structure=structure)
 
-        bkg = mask & (~pk)
+        n_pk = np.sum(pk)
+
+        for i in range(3):
+            bkg = mask & (~pk)
+
+            n_bkg = np.sum(bkg)
+
+            if n_bkg < 2 * n_pk:
+                mask = scipy.ndimage.binary_dilation(mask, structure=structure)
 
         scale = scipy.stats.chi2.ppf(p, df=3)
 
@@ -3610,13 +3550,15 @@ class PeakEllipsoid:
         core = pk & (n > 0)
         shell = bkg & (n > 0)
 
+        d_min, d_max = np.nanpercentile(d[shell], [25, 75])
+
+        shell = bkg & (n > 0) & (d_min <= d) & (d <= d_max)
+
         d_pk = d[core].copy()
         n_pk = n[core].copy()
 
         d_bkg = d[shell].copy()
         n_bkg = n[shell].copy()
-
-        # frac = np.nansum(kernel[core]) / np.nansum(kernel[pk])
 
         bkg_cnts = np.nansum(d_bkg)
         bkg_norm = np.nansum(n_bkg)
@@ -3682,6 +3624,37 @@ class PeakEllipsoid:
         if not sig > 0:
             sig = float("-inf")
 
+        mask = core | shell
+
+        y = d / n
+        e = np.sqrt(d) / n
+
+        y[np.isinf(y)] = np.nan
+        e[np.isinf(e)] = np.nan
+
+        w = 1 / e**2
+        w[np.isinf(e)] = np.nan
+
+        S = np.nansum(w[mask])
+        Sx = np.nansum(kernel[mask] * w[mask])
+        Sy = np.nansum(y[mask] * w[mask])
+        Sxx = np.nansum(kernel[mask] ** 2 * w[mask])
+        Sxy = np.nansum(kernel[mask] * y[mask] * w[mask])
+        D = S * Sxx - Sx**2
+
+        c = (S * Sxy - Sx * Sy) / D
+        b = (Sxx * Sy - Sx * Sxy) / D
+        s = np.sqrt(S / D)
+
+        n_mask = np.nansum(mask)
+        if n_mask <= 2:
+            n_mask = np.inf
+
+        chi_2_dof = np.nansum((y - c * kernel - b) ** 2) / (n_mask - 2)
+
+        if c < 3 * s * np.sqrt(chi_2_dof) and chi_2_dof > 0:
+            intens = sig
+
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
     def fitted_profile(self, x0, x1, x2, d, n, c, S, p=0.997):
@@ -3745,6 +3718,7 @@ class PeakEllipsoid:
             bounds=bounds,
             args=(x, y, e),
             loss="soft_l1",
+            max_nfev=20,
         )
 
         J = sol.jac
@@ -3783,10 +3757,10 @@ class PeakEllipsoid:
 
         d3x = self.voxel_volume(x0, x1, x2)
 
-        pk, bkg, mask, kernel = self.peak_roi(x0, x1, x2, c, S, det_mask)
-
         d[np.isinf(d)] = np.nan
         n[np.isinf(n)] = np.nan
+
+        pk, bkg, mask, kernel = self.peak_roi(x0, x1, x2, c, S, 1)
 
         result = self.extract_intensity(d, n, pk, bkg, kernel)
 
