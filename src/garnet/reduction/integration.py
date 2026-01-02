@@ -3561,7 +3561,7 @@ class PeakEllipsoid:
         if np.sum(shell) > 0:
             d_min, d_max = np.nanpercentile(d[shell], [25, 75])
 
-        shell = bkg & (n > 0) & (d_min >= d) & (d <= d_max)
+        shell = bkg & (n > 0) & (d >= d_min) & (d <= d_max)
 
         d_pk = d[core].copy()
         n_pk = n[core].copy()
