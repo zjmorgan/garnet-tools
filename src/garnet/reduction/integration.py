@@ -3626,36 +3626,36 @@ class PeakEllipsoid:
         if not sig > 0:
             sig = float("-inf")
 
-        mask = core | shell
+        # mask = core | shell
 
-        y = d / n
-        e = np.sqrt(d) / n
+        # y = d / n
+        # e = np.sqrt(d) / n
 
-        y[np.isinf(y)] = np.nan
-        e[np.isinf(e)] = np.nan
+        # y[np.isinf(y)] = np.nan
+        # e[np.isinf(e)] = np.nan
 
-        w = 1 / e**2
-        w[np.isinf(e)] = np.nan
+        # w = 1 / e**2
+        # w[np.isinf(e)] = np.nan
 
-        S = np.nansum(w[mask])
-        Sx = np.nansum(kernel[mask] * w[mask])
-        Sy = np.nansum(y[mask] * w[mask])
-        Sxx = np.nansum(kernel[mask] ** 2 * w[mask])
-        Sxy = np.nansum(kernel[mask] * y[mask] * w[mask])
-        D = S * Sxx - Sx**2
+        # S = np.nansum(w[mask])
+        # Sx = np.nansum(kernel[mask] * w[mask])
+        # Sy = np.nansum(y[mask] * w[mask])
+        # Sxx = np.nansum(kernel[mask] ** 2 * w[mask])
+        # Sxy = np.nansum(kernel[mask] * y[mask] * w[mask])
+        # D = S * Sxx - Sx**2
 
-        c = (S * Sxy - Sx * Sy) / D
-        b = (Sxx * Sy - Sx * Sxy) / D
-        s = np.sqrt(S / D)
+        # c = (S * Sxy - Sx * Sy) / D
+        # b = (Sxx * Sy - Sx * Sxy) / D
+        # s = np.sqrt(S / D)
 
-        n_mask = np.nansum(mask)
-        if n_mask <= 2:
-            n_mask = np.inf
+        # n_mask = np.nansum(mask)
+        # if n_mask <= 2:
+        #     n_mask = np.inf
 
-        chi_2_dof = np.nansum((y - c * kernel - b) ** 2) / (n_mask - 2)
+        # chi_2_dof = np.nansum((y - c * kernel - b) ** 2) / (n_mask - 2)
 
-        if c < 3 * s * np.sqrt(chi_2_dof) and chi_2_dof > 0:
-            intens = sig
+        # if c < 3 * s * np.sqrt(chi_2_dof) and chi_2_dof > 0:
+        #     intens = sig
 
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
