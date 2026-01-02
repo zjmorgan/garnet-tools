@@ -3702,14 +3702,12 @@ class PeakEllipsoid:
         y[np.isinf(y)] = np.nan
         e[np.isinf(e)] = np.nan
 
-        b = np.nanpercentile(y, 10)
-        I = np.nansum(y - b) * dx0
+        b = np.nanmin(y)
+        I = np.nansum(y) * dx0
         A = np.nanmax(y)
 
         if A <= 0:
             A = 1
-        if I <= 0:
-            I = np.nansum(y) * dx0
         if I <= 0:
             I = 1
         if b >= A or b <= 0:
