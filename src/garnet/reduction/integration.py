@@ -3754,11 +3754,7 @@ class PeakEllipsoid:
 
         I, b, mu, sigma = sol.x
 
-        cov = (
-            np.linalg.inv(inv_cov)
-            if np.linalg.det(inv_cov) > 0
-            else np.zeros((3, 3))
-        )
+        cov = np.linalg.pinv(inv_cov)
 
         chi2dof = np.sum(sol.fun**2) / (sol.fun.size - sol.x.size)
         cov *= chi2dof
