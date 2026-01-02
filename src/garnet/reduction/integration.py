@@ -3728,7 +3728,7 @@ class PeakEllipsoid:
 
         diff = np.diff(bounds, axis=0)
 
-        invalid = diff <= 0
+        invalid = (diff <= 0) | ~np.isfinite(diff)
 
         bounds[0][invalid[0]] = -1e16
         bounds[1][invalid[0]] = +1e16
