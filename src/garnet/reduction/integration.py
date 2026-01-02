@@ -3704,12 +3704,18 @@ class PeakEllipsoid:
 
         b = np.nanpercentile(y, 10)
         I = np.nansum(y - b) * dx0
+        A = np.nanmax(y)
+
+        if A == 0:
+            A = 1
+        if I == 0:
+            I = 1
 
         mu = 0
         sigma = np.sqrt(S[0, 0] / scale)
 
-        I_min, b_min, mu_min, sigma_min = 0, 0, x[0], 0.5 * sigma
-        I_max, b_max, mu_max, sigma_max = 2 * I, np.nanmax(y), x[-1], 2 * sigma
+        I_min, b_min, mu_min, sigma_min = 0, 0, mu - sigma, 0.5 * sigma
+        I_max, b_max, mu_max, sigma_max = 2 * I, A, mu + sigma, 2 * sigma
 
         bounds = np.array(
             [
