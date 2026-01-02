@@ -3708,10 +3708,17 @@ class PeakEllipsoid:
         I_min, b_min, mu_min, sigma_min = 0, 0, x[0], 0.5 * sigma
         I_max, b_max, mu_max, sigma_max = 2 * I, np.nanmax(y), x[-1], 2 * sigma
 
-        bounds = (
+        bounds = np.array(
             [I_min, b_min, mu_min, sigma_min],
             [I_max, b_max, mu_max, sigma_max],
         )
+
+        diff = np.diff(bounds, axis=0)
+
+        invalid = diff <= 0
+
+        bounds[0][invalid] = -np.inf
+        bounds[1][invalid] = +np.inf
 
         x0 = [I, b, mu, sigma]
         sol = scipy.optimize.least_squares(
