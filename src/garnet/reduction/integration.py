@@ -3706,9 +3706,9 @@ class PeakEllipsoid:
         I = np.nansum(y - b) * dx0
         A = np.nanmax(y)
 
-        if A == 0:
+        if A <= 0:
             A = 1
-        if I == 0:
+        if I <= 0:
             I = 1
 
         mu = 0
