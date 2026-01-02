@@ -3699,6 +3699,9 @@ class PeakEllipsoid:
         y = d_int / n_int
         e = np.sqrt(d_int + 1) / n_int
 
+        y[np.isinf(y)] = np.nan
+        e[np.isinf(e)] = np.nan
+
         b = np.nanpercentile(y, 10)
         I = np.nansum(y - b) * dx0
 
@@ -3722,7 +3725,10 @@ class PeakEllipsoid:
         bounds[0][invalid[0]] = -np.inf
         bounds[1][invalid[0]] = +np.inf
 
-        x0 = [I, b, mu, sigma]
+        x0 = np.array([I, b, mu, sigma])
+
+        x0[np.isinf(x0)] = 0
+
         sol = scipy.optimize.least_squares(
             self.profile_cost,
             x0=x0,
