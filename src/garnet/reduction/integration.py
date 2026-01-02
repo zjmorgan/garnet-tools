@@ -985,6 +985,7 @@ class Integration(SubPlan):
                 self.peak_plot.save_plot(peak_file)
             except Exception as e:
                 print("Exception saving figure: {}".format(e))
+                print(traceback.format_exc())
                 return key, None
 
             value = intens, sig, shape, [key, wavelength], hkl
@@ -3705,74 +3706,109 @@ class PeakEllipsoid:
         y = d_int / n_int
         e = np.sqrt(d_int + 1) / n_int
 
-        y[np.isinf(y)] = np.nan
-        e[np.isinf(e)] = np.nan
+        y[~np.isfinite(y)] = np.nan
+        e[~np.isfinite(e)] = np.nan
 
-        b = np.nanmin(y)
-        I = np.nansum(y) * dx0
-        A = np.nanmax(y)
+        fit_mask = np.isfinite(y) & np.isfinite(e) & (e > 0)
 
-        if A <= 0:
-            A = 1
-        if I <= 0:
-            I = 1
-        if b >= A or b <= 0:
-            b = A / 2
+        if np.count_nonzero(fit_mask) < 4:
+            b = np.nanmin(y)
+            I = np.nansum(y) * dx0
 
-        mu = 0
-        sigma = np.sqrt(S[0, 0] / scale)
+            if not np.isfinite(b) or b <= 0:
+                b = 0.0
+            if not np.isfinite(I):
+                I = 0.0
 
-        I_min, b_min, mu_min, sigma_min = 0, 0, mu - sigma, 0.5 * sigma
-        I_max, b_max, mu_max, sigma_max = 2 * I, A, mu + sigma, 2 * sigma
+            I_err = np.nan
+            b_err = np.nan
+            y_fit = self.profile_function([I, b, 0.0, 1.0], x)
+            return I, I_err, b, b_err, x, y_fit, y, e
 
-        bounds = np.array(
-            [
-                [I_min, b_min, mu_min, sigma_min],
-                [I_max, b_max, mu_max, sigma_max],
-            ]
-        )
+        x_data = x[fit_mask]
+        y_data = y[fit_mask]
+        e_data = e[fit_mask]
 
-        diff = np.diff(bounds, axis=0)
+        b = np.nanmin(y_data)
+        I = np.nansum(y_data) * dx0
+        A = np.nanmax(y_data)
 
-        invalid = (diff <= 0) | ~np.isfinite(diff)
+        if not np.isfinite(A) or A <= 0:
+            A = 1.0
+        if not np.isfinite(I) or I <= 0:
+            I = A * dx0 if np.isfinite(dx0) and dx0 > 0 else 1.0
+        if (not np.isfinite(b)) or (b >= A) or (b <= 0):
+            b = 0.5 * A
 
-        bounds[0][invalid[0]] = -1e16
-        bounds[1][invalid[0]] = +1e16
+        mu = 0.0
+        sigma2 = S[0, 0] / scale
+        if not np.isfinite(sigma2) or sigma2 <= 0:
+            sigma = 1.0
+        else:
+            sigma = np.sqrt(sigma2)
 
-        x0 = np.array([I, b, mu, sigma])
+        I_min, I_max = 0.0, 2.0 * I
+        b_min, b_max = 0.0, A
+        mu_min, mu_max = mu - sigma, mu + sigma
+        sigma_min, sigma_max = 0.5 * sigma, 2.0 * sigma
 
-        invalid = bounds[0] >= x0
-        bounds[0][invalid] = -1e16
-        bounds[1][invalid] = +1e16
-        x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
+        bounds_low = np.array([I_min, b_min, mu_min, sigma_min], dtype=float)
+        bounds_high = np.array([I_max, b_max, mu_max, sigma_max], dtype=float)
 
-        invalid = bounds[1] <= x0
-        bounds[0][invalid] = -1e16
-        bounds[1][invalid] = +1e16
-        x0[invalid] = (bounds[0][invalid] + bounds[1][invalid]) / 2
+        for j in range(4):
+            if (
+                not np.isfinite(bounds_low[j])
+                or not np.isfinite(bounds_high[j])
+                or bounds_high[j] <= bounds_low[j]
+            ):
+                bounds_low[j] = -1e16
+                bounds_high[j] = +1e16
 
-        sol = scipy.optimize.least_squares(
-            self.profile_cost,
-            x0=x0,
-            bounds=bounds,
-            args=(x, y, e),
-            loss="soft_l1",
-            max_nfev=20,
-        )
+        x_init = np.array([I, b, mu, sigma], dtype=float)
+        for j in range(4):
+            if not np.isfinite(x_init[j]):
+                x_init[j] = 0.0
 
-        J = sol.jac
-        inv_cov = J.T.dot(J)
+        for j in range(4):
+            low, high = bounds_low[j], bounds_high[j]
+            if low >= high:
+                continue
+            eps = 1e-8 * max(1.0, abs(low), abs(high))
+            if x_init[j] <= low:
+                x_init[j] = low + eps
+            if x_init[j] >= high:
+                x_init[j] = high - eps
 
-        I, b, mu, sigma = sol.x
+        bounds = (bounds_low, bounds_high)
 
-        cov = np.linalg.pinv(inv_cov)
+        try:
+            sol = scipy.optimize.least_squares(
+                self.profile_cost,
+                x0=x_init,
+                bounds=bounds,
+                args=(x_data, y_data, e_data),
+                loss="soft_l1",
+                max_nfev=20,
+            )
+            I, b, mu, sigma = sol.x
 
-        chi2dof = np.sum(sol.fun**2) / (sol.fun.size - sol.x.size)
-        cov *= chi2dof
+            J = sol.jac
+            inv_cov = J.T.dot(J)
+            cov = np.linalg.pinv(inv_cov)
 
-        I_err, b_err, mu_err, sigma_err = np.sqrt(np.diagonal(cov))
+            dof = max(sol.fun.size - sol.x.size, 1)
+            chi2dof = np.sum(sol.fun**2) / dof
+            cov *= chi2dof
 
-        y_fit = self.profile_function(sol.x, x)
+            I_err, b_err, mu_err, sigma_err = np.sqrt(np.diagonal(cov))
+        except Exception:
+            # If the optimizer fails for any reason, fall back to
+            # the initial estimates without raising.
+            I, b, mu, sigma = x_init
+            I_err = np.nan
+            b_err = np.nan
+
+        y_fit = self.profile_function([I, b, mu, sigma], x)
 
         return I, I_err, b, b_err, x, y_fit, y, e
 
