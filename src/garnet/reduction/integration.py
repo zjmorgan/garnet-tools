@@ -3712,6 +3712,8 @@ class PeakEllipsoid:
             I = np.nansum(y) * dx0
         if I <= 0:
             I = 1
+        if b >= A:
+            b = A / 2
 
         mu = 0
         sigma = np.sqrt(S[0, 0] / scale)
