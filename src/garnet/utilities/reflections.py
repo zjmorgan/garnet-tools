@@ -1425,18 +1425,21 @@ class Peaks:
         powder_err = []
         peak_err = []
         Q0_mod = []
+        Q_rad = []
 
         for peak in mtd[self.peaks]:
             h, k, l = peak.getHKL()
             d0 = ol.d(h, k, l)
             powder_err.append(peak.getDSpacing() / d0 - 1)
-            Q0 = 2 * np.pi * ol.getUB() @ np.array([h, k, l])
-            peak_err.append(peak.getQSampleFrame() - Q0)
             Q0_mod.append(2 * np.pi / d0)
 
             shape = peak.getPeakShape()
             if shape.shapeName() == "ellipsoid":
                 ellipsoid = eval(shape.toJSON())
+
+                v0 = [float(val) for val in ellipsoid["direction0"].split(" ")]
+                v1 = [float(val) for val in ellipsoid["direction1"].split(" ")]
+                v2 = [float(val) for val in ellipsoid["direction2"].split(" ")]
 
                 r0 = ellipsoid["radius0"]
                 r1 = ellipsoid["radius1"]
@@ -1444,52 +1447,108 @@ class Peaks:
 
             else:
                 r0 = r1 = r2 = 1e-6
+                v0, v1, v2 = np.eye(3).tolist()
+
+            r = np.array([r0, r1, r2])
+
+            U = np.column_stack([v0, v1, v2])
+            V = np.diag(r**2)
+            S = np.dot(np.dot(U, V), U.T)
 
             vol = 4 / 3 * np.pi * r0 * r1 * r2
 
             Q_vol.append(vol)
 
+            R = peak.getGoniometerMatrix()
+
+            two_theta = peak.getScattering()
+            az_phi = peak.getAzimuthal()
+
+            kf_hat = np.array(
+                [
+                    np.sin(two_theta) * np.cos(az_phi),
+                    np.sin(two_theta) * np.sin(az_phi),
+                    np.cos(two_theta),
+                ]
+            )
+
+            ki_hat = np.array([0, 0, 1])
+
+            n = kf_hat - ki_hat
+            n /= np.linalg.norm(n)
+
+            u = np.cross(ki_hat, kf_hat)
+            u /= np.linalg.norm(u)
+
+            v = np.cross(n, u)
+            v /= np.linalg.norm(v)
+
+            n, u, v = R.T @ n, R.T @ u, R.T @ v
+
+            Q0 = 2 * np.pi * ol.getUB() @ np.array([h, k, l])
+            Q = peak.getQSampleFrame()
+
+            W = np.column_stack([n, u, v])
+
+            peak_err.append(W @ (Q - Q0))
+
+            r0 = np.sqrt(n.T @ (S @ n))
+            r1 = np.sqrt(u.T @ (S @ u))
+            r2 = np.sqrt(v.T @ (S @ v))
+
+            Q_rad.append([r0, r1, r2])
+
         Q0_mod = np.array(Q0_mod)
         powder_err = np.array(powder_err)
         peak_err = np.array(peak_err) / Q0_mod[:, np.newaxis]
         Q_vol = np.array(Q_vol)
+        Q_rad = np.array(Q_rad)
 
-        powder_Q1, powder_Q3 = np.nanpercentile(powder_err, [25, 75])
-        peak_Q1, peak_Q3 = np.nanpercentile(peak_err, [25, 75], axis=0)
+        powder_med = np.nanmedian(powder_err)
+        peak_med = np.nanmedian(peak_err, axis=0)
 
-        powder_IQR = powder_Q3 - powder_Q1
-        peak_IQR = peak_Q3 - peak_Q1
+        powder_mad = np.nanmedian(np.abs(powder_err - powder_med))
+        peak_mad = np.nanmedian(np.abs(peak_err - peak_med), axis=0)
 
-        powder_min = powder_Q1 - 3 * powder_IQR
-        powder_max = powder_Q3 + 3 * powder_IQR
+        powder_min = powder_med - 1.5 * powder_mad
+        powder_max = powder_med + 1.5 * powder_mad
 
-        peak_min = peak_Q1 - 3 * peak_IQR
-        peak_max = peak_Q3 + 3 * peak_IQR
+        peak_min = peak_med - 1.5 * peak_mad
+        peak_max = peak_med + 1.5 * peak_mad
 
-        vol_Q1, vol_Q3 = np.nanpercentile(Q_vol, [25, 75])
-        vol_IQR = vol_Q3 - vol_Q1
+        vol_med = np.nanmedian(Q_vol)
+        vol_mad = np.nanmedian(np.abs(Q_vol - vol_med))
 
-        vol_cut = vol_Q3 + 3 * vol_IQR
+        vol_cut = vol_med + 1.5 * vol_mad
+
+        radius_med = np.nanmedian(Q_rad, axis=0)
+
+        radius_mad = np.nanmedian(np.abs(Q_rad - radius_med), axis=0)
+
+        radius_max = radius_med + 1.5 * radius_mad
 
         filename = os.path.splitext(self.filename)[0]
 
-        fig, ax = plt.subplots(5, 1, layout="constrained")
-        ax[4].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+        fig, ax = plt.subplots(4, 2, layout="constrained", sharex=True)
+        ax = ax.T.ravel()
+        ax[3].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+        ax[7].set_xlabel("$|Q|$ [$\AA^{-1}$]")
         ax[0].set_ylabel("$d/d_0-1$")
         ax[1].set_ylabel("$\Delta{Q_1}/|Q|$")
         ax[2].set_ylabel("$\Delta{Q_2}/|Q|$")
         ax[3].set_ylabel("$\Delta{Q_3}/|Q|$")
-        ax[4].set_ylabel("$V$")
-        ax[0].minorticks_on()
-        ax[1].minorticks_on()
-        ax[2].minorticks_on()
-        ax[3].minorticks_on()
-        ax[4].minorticks_on()
-        ax[0].plot(Q0_mod, powder_err, ".", color="C0", rasterized=True)
-        ax[1].plot(Q0_mod, peak_err[:, 0], ".", color="C1", rasterized=True)
-        ax[2].plot(Q0_mod, peak_err[:, 1], ".", color="C2", rasterized=True)
-        ax[3].plot(Q0_mod, peak_err[:, 2], ".", color="C3", rasterized=True)
-        ax[4].plot(Q0_mod, Q_vol, ".", color="C4", rasterized=True)
+        ax[4].set_ylabel("$V$ [$\AA^{-3}$]")
+        ax[5].set_ylabel("$r_1$  [$\AA^{-1}$]")
+        ax[6].set_ylabel("$r_2$  [$\AA^{-1}$]")
+        ax[7].set_ylabel("$r_3$  [$\AA^{-1}$]")
+        ax[0].plot(Q0_mod, powder_err, ",", color="C0", rasterized=True)
+        ax[1].plot(Q0_mod, peak_err[:, 0], ",", color="C1", rasterized=True)
+        ax[2].plot(Q0_mod, peak_err[:, 1], ",", color="C2", rasterized=True)
+        ax[3].plot(Q0_mod, peak_err[:, 2], ",", color="C3", rasterized=True)
+        ax[4].plot(Q0_mod, Q_vol, ",", color="C4", rasterized=True)
+        ax[5].plot(Q0_mod, Q_rad[:, 0], ",", color="C5", rasterized=True)
+        ax[6].plot(Q0_mod, Q_rad[:, 1], ",", color="C6", rasterized=True)
+        ax[7].plot(Q0_mod, Q_rad[:, 2], ",", color="C7", rasterized=True)
         ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
         ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
         ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
@@ -1499,8 +1558,12 @@ class Peaks:
         ax[3].axhline(peak_min[2], color="k", linestyle="--", linewidth=1)
         ax[3].axhline(peak_max[2], color="k", linestyle="--", linewidth=1)
         ax[4].axhline(vol_cut, color="k", linestyle="--", linewidth=1)
+        ax[5].axhline(radius_max[0], color="k", linestyle="--", linewidth=1)
+        ax[6].axhline(radius_max[1], color="k", linestyle="--", linewidth=1)
+        ax[7].axhline(radius_max[2], color="k", linestyle="--", linewidth=1)
 
-        for i in range(5):
+        for i in range(8):
+            ax[0].minorticks_on()
             for d in d_al:
                 ax[i].axvline(
                     2 * np.pi / d, color="k", linestyle=":", linewidth=1
@@ -1560,61 +1623,16 @@ class Peaks:
         if os.path.exists(merge):
             LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
 
-        shape_dict = {}
-
-        s = np.array(
-            [
-                [sx, sy, sz]
-                for sx in [-1, 1]
-                for sy in [-1, 1]
-                for sz in [-1, 1]
-            ]
-        )
-
-        for peak in mtd[self.peaks]:
-            c = np.array(peak.getQSampleFrame())
-
-            shape = peak.getPeakShape()
-
-            if shape.shapeName() == "ellipsoid":
-                ellipsoid = eval(shape.toJSON())
-
-                v0 = [float(val) for val in ellipsoid["direction0"].split(" ")]
-                v1 = [float(val) for val in ellipsoid["direction1"].split(" ")]
-                v2 = [float(val) for val in ellipsoid["direction2"].split(" ")]
-
-                r0 = ellipsoid["radius0"]
-                r1 = ellipsoid["radius1"]
-                r2 = ellipsoid["radius2"]
-
-            else:
-                r0 = r1 = r2 = 1e-6
-                v0, v1, v2 = np.eye(3).tolist()
-
-            run = peak.getRunNumber()
-            h, k, l = [int(val) for val in peak.getIntHKL()]
-            m, n, p = [int(val) for val in peak.getIntMNP()]
-            key = (run, h, k, l, m, n, p)
-
-            r = np.array([r0, r1, r2])
-
-            U = np.column_stack([v0, v1, v2])
-            V_inv = np.diag(1 / r)
-            S_inv = np.dot(np.dot(U, V_inv), U.T)
-
-            local_corners = s * r
-            global_corners = c + local_corners @ U.T
-            min_corner = np.min(global_corners, axis=0)
-            max_corner = np.max(global_corners, axis=0)
-
-            shape_dict[key] = c, S_inv, min_corner, max_corner
-
-        self.shape_dict = shape_dict
-
         ub_file = self.filename.replace(".nxs", ".mat")
 
         if os.path.exists(ub_file):
             LoadIsawUB(Filename=ub_file, InputWorkspace=self.peaks)
+
+        self.filename = re.sub(
+            r"(_\([-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+\))+",
+            "",
+            self.filename,
+        )
 
         # self.remove_edge_peaks()
         self.remove_non_integrated()
@@ -2078,41 +2096,8 @@ class Peaks:
 
         filename = os.path.splitext(self.filename)[0] + app
 
-        # FilterPeaks(
-        #     InputWorkspace=peaks,
-        #     OutputWorkspace=peaks,
-        #     FilterVariable="Signal/Noise",
-        #     FilterValue=3,
-        #     Operator=">",
-        # )
-
         if mtd.doesExist(self.peaks + "_merge"):
             self.merge_intensities(name)
-
-        # for peak in mtd[peaks]:
-        # I = peak.getIntensity()
-        # Q = 2 * np.pi / peak.getDSpacing()
-        # sig = peak.getSigmaIntensity()
-        # diff = peak.getBinCount()
-        # A = [np.log(I) ** 2, Q**2, np.log(I) * Q, np.log(I), Q, 1]
-        # sig_est = np.dot(A, self.x) * sig
-        # I if diff >= 2 * sig and diff > 0 else sig
-        # peak.setSigmaIntensity(sig)
-
-        # _, indices = np.unique(
-        #     mtd[peaks].column("BankName"), return_inverse=True
-        # )
-
-        # for i, peak in zip(indices.tolist(), mtd[peaks]):
-        #    peak.setRunNumber(1)
-
-        # FilterPeaks(
-        #     InputWorkspace=peaks,
-        #     OutputWorkspace=peaks,
-        #     FilterVariable="Signal/Noise",
-        #     FilterValue=3,
-        #     Operator=">",
-        # )
 
         SortPeaksWorkspace(
             InputWorkspace=peaks,
@@ -2148,6 +2133,10 @@ class Peaks:
         if self.max_order > 0:
             nuclear = peaks + "_nuc"
             satellite = peaks + "_sat"
+
+            for peak in mtd[peaks]:
+                peak.setRunNumber(1)
+                peak.setPeakNumber(1)
 
             FilterPeaks(
                 InputWorkspace=peaks,
@@ -2204,6 +2193,47 @@ class Peaks:
             )
 
             self.resort_hkl(satellite, filename + "_sat.hkl")
+
+            if np.linalg.norm(self.modHKL[:, 1]) > 0:
+                for i in range(3):
+                    if np.linalg.norm(self.modHKL[:, i]) > 0:
+                        CloneWorkspace(
+                            InputWorkspace=peaks, OutputWorkspace="tmp"
+                        )
+
+                        for peak in mtd["tmp"]:
+                            int_mnp = peak.getIntMNP()
+                            if int_mnp[i] == 0:
+                                peak.setIntensity(0)
+                                peak.setSigmaIntensity(0)
+                            else:
+                                peak.setIntMNP(V3D(int_mnp[i], 0, 0))
+
+                        ol = mtd["tmp"].sample().getOrientedLattice()
+                        ol.setMaxOrder(self.max_order)
+                        ol.setModVec1(V3D(*self.modHKL[:, i]))
+                        ol.setModVec2(V3D(0, 0, 0))
+                        ol.setModVec3(V3D(0, 0, 0))
+                        ol.setModUB(ol.getUB() @ ol.getModHKL())
+
+                        k = i + 1
+
+                        SaveHKL(
+                            InputWorkspace="tmp",
+                            Filename=filename + "_sat_k={}.hkl".format(k),
+                            DirectionCosines=True,
+                            ApplyAnvredCorrections=False,
+                            SortBy="RunNumber",
+                        )
+
+                        SaveIsawUB(
+                            InputWorkspace="tmp",
+                            Filename=filename + "_sat_k={}.mat".format(k),
+                        )
+
+                        self.resort_hkl(
+                            "tmp", filename + "_sat_k={}.hkl".format(k)
+                        )
 
     def _angle_distance_matrix(self, Rs):
         G = np.tensordot(Rs, Rs, axes=([1, 2], [1, 2]))

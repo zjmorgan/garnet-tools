@@ -34,16 +34,8 @@ from matplotlib.figure import Figure
 from PIL import Image
 import numpy as np
 
-theme = False
-
-try:
-    import qdarktheme
-
-    qdarktheme.enable_hi_dpi()
-    theme = True
-
-except ImportError:
-    print("Default theme")
+from qdarkstyle.light.palette import LightPalette
+import qdarkstyle
 
 
 class View(QWidget):
@@ -375,6 +367,9 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
+
+    app.setStyleSheet(qdarkstyle.load_stylesheet(palette=LightPalette))
+
     window = IntegratedPeaksViewer()
     window.show()
     sys.exit(app.exec_())

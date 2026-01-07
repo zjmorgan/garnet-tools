@@ -33,6 +33,9 @@ from matplotlib.backends.backend_qt5agg import (
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
+from qdarkstyle.light.palette import LightPalette
+import qdarkstyle
+
 import pyoncat
 
 directory = os.path.dirname(os.path.realpath(__file__))
@@ -970,6 +973,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
+    app.setStyleSheet(qdarkstyle.load_stylesheet(palette=LightPalette))
     window = ExperimentBrowser()
     window.show()
     sys.exit(app.exec_())

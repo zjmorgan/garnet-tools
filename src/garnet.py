@@ -26,6 +26,10 @@ from qtpy.QtWidgets import (
 from qtpy.QtGui import QDoubleValidator, QIntValidator, QFont, QIcon
 from qtpy.QtCore import Qt, QProcess
 
+from qdarkstyle.light.palette import LightPalette
+import qdarkstyle
+import qtawesome as qta
+
 from garnet._version import __version__
 
 from garnet.config.instruments import beamlines
@@ -68,6 +72,9 @@ class FormView(QWidget):
         self.load_button = QPushButton("Load Config", self)
         self.save_button = QPushButton("Save Config", self)
         self.stop_button = QPushButton("Stop Process", self)
+
+        self.load_button.setIcon(qta.icon("fa6s.folder-open"))
+        self.save_button.setIcon(qta.icon("fa6s.floppy-disk"))
 
         load_save_layout.addWidget(name_label)
         load_save_layout.addWidget(self.output_line)
@@ -1171,6 +1178,16 @@ class FormView(QWidget):
         self.mask_browse_button = QPushButton("Mask", self)
         self.gonio_browse_button = QPushButton("Goniometer", self)
 
+        browse_icon = qta.icon("fa6s.folder-open")
+        self.ub_browse_button.setIcon(browse_icon)
+        self.bkg_browse_button.setIcon(browse_icon)
+        self.van_browse_button.setIcon(browse_icon)
+        self.flux_browse_button.setIcon(browse_icon)
+        self.cal_browse_button.setIcon(browse_icon)
+        self.tube_browse_button.setIcon(browse_icon)
+        self.mask_browse_button.setIcon(browse_icon)
+        self.gonio_browse_button.setIcon(browse_icon)
+
         experiment_params_layout.addWidget(self.instrument_combo)
         experiment_params_layout.addWidget(ipts_label)
         experiment_params_layout.addWidget(self.ipts_line)
@@ -1854,6 +1871,7 @@ class FormPresenter:
             self.view.set_instrument(inst)
 
             self.switch_instrument()
+            self.model.load_config(filename)
 
             el = self.model.get_elastic()
             if el is not None:
@@ -2503,6 +2521,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 def gui():
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
+    app.setStyleSheet(qdarkstyle.load_stylesheet(palette=LightPalette))
     window = Garnet()
     window.show()
     sys.exit(app.exec_())
