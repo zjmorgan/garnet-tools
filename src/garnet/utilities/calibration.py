@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from matplotlib.backends.backend_pdf import PdfPages
 
-import scipy.spatial.transform
+from scipy.spatial.transform import Rotation
 import scipy.optimize
 import scipy.linalg
 
@@ -16,6 +16,7 @@ from mantid.simpleapi import (
     LoadNexus,
     SaveNexus,
     LoadEmptyInstrument,
+    ExtractMonitors,
     LoadParameterFile,
     SaveParameterFile,
     SetInstrumentParameter,
@@ -34,6 +35,7 @@ from mantid.simpleapi import (
     SaveAscii,
     CloneWorkspace,
     DeleteWorkspace,
+    PreprocessDetectorsToMD,
     mtd,
 )
 
@@ -132,7 +134,6 @@ class Calibration:
         mtd["goniometer"].addColumn("float", "Refined X Angle")
         mtd["goniometer"].addColumn("float", "Refined Y Angle")
         mtd["goniometer"].addColumn("float", "Refined Z Angle")
-        mtd["goniometer"].addColumn("float", "Offset Omega")
         mtd["goniometer"].addColumn("float", "Offset Chi")
 
     def reindex_peaks(self):
@@ -289,6 +290,12 @@ class Calibration:
             OutputWorkspace=self.instrument,
         )
 
+        ExtractMonitors(
+            InputWorkspace=self.instrument,
+            MonitorWorkspace="monitors",
+            DetectorWorkspace=self.instrument,
+        )
+
     def _get_output_folder(self):
         calibration_folder = self.calibration_folder.format(self.instrument)
         output_folder = os.path.join(calibration_folder, self.output_folder)
@@ -412,64 +419,87 @@ class Calibration:
             FixAspectRatio=True,
         )
 
+    def gravity_angle(self):
+        PreprocessDetectorsToMD(
+            InputWorkspace=self.instrument, OutputWorkspace="detectors"
+        )
+
+        l2 = np.array(mtd["detectors"].column(1))
+        tt = np.array(mtd["detectors"].column(2))
+        az = np.array(mtd["detectors"].column(3))
+
+        x = l2 * np.sin(tt) * np.cos(az)
+        y = l2 * np.sin(tt) * np.sin(az)
+
+        mask = np.isfinite(x) & np.isfinite(y)
+
+        A = np.sum(x[mask] ** 2)
+        B = np.sum(y[mask] ** 2)
+        C = np.sum(x[mask] * y[mask])
+
+        delta = np.rad2deg(0.5 * np.arctan2(2 * C, B - A))
+
+        if delta > 45:
+            delta -= 90
+        elif delta < -45:
+            delta += 90
+
+        return -delta
+
     def calibrate_goniometer(self, iteration):
-        G, omega_off, chi_off = self.refine_goniometer()
+        G_inst, G_gon, chi_off = self.refine_goniometer()
 
         SaveAscii(
             InputWorkspace="goniometer",
             Filename=self._get_ouput(".txt"),
         )
 
-        # LoadParameterFile(
-        #     Workspace=self.instrument,
-        #     Filename=self._get_ouput(".xml"),
-        # )
+        LoadParameterFile(
+            Workspace=self.instrument,
+            Filename=self._get_ouput(".xml"),
+        )
 
-        # inst = mtd[self.instrument].getInstrument()
+        inst = mtd[self.instrument].getInstrument()
 
-        # components = np.unique(mtd["peaks"].column("BankName")).tolist()
+        components = np.unique(mtd["peaks"].column("BankName")).tolist()
 
-        # for component in components:
-        #     pos = list(inst.getComponentByName(component).getPos())
-        #     rot = inst.getComponentByName(component).getRotation()
-        #     quat = [rot.real(), rot.imagI(), rot.imagJ(), rot.imagK()]
-        #     R = scipy.spatial.transform.Rotation.from_quat(
-        #         quat, scalar_first=True
-        #     ).as_matrix()
+        for component in components:
+            pos = list(inst.getComponentByName(component).getPos())
+            rot = inst.getComponentByName(component).getRotation()
+            quat = [rot.real(), rot.imagI(), rot.imagJ(), rot.imagK()]
+            R = Rotation.from_quat(quat, scalar_first=True).as_matrix()
 
-        #     x, y, z = Gz @ pos
-        #     Rp = Gz @ R
+            x, y, z = G_inst.T @ pos
+            Rp = G_inst.T @ R
 
-        #     w = scipy.spatial.transform.Rotation.from_matrix(Rp).as_rotvec(
-        #         degrees=True
-        #     )
-        #     theta = np.linalg.norm(w)
-        #     wx, wy, wz = (w / theta) if not np.isclose(theta, 0) else (0, 0, 1)
+            w = Rotation.from_matrix(Rp).as_rotvec(degrees=True)
+            theta = np.linalg.norm(w)
+            wx, wy, wz = (w / theta) if not np.isclose(theta, 0) else (0, 0, 1)
 
-        #     MoveInstrumentComponent(
-        #         Workspace=self.instrument,
-        #         ComponentName=component,
-        #         X=x,
-        #         Y=y,
-        #         Z=z,
-        #         RelativePosition=False,
-        #     )
+            MoveInstrumentComponent(
+                Workspace=self.instrument,
+                ComponentName=component,
+                X=x,
+                Y=y,
+                Z=z,
+                RelativePosition=False,
+            )
 
-        #     RotateInstrumentComponent(
-        #         Workspace=self.instrument,
-        #         ComponentName=component,
-        #         X=wx,
-        #         Y=wy,
-        #         Z=wz,
-        #         Angle=theta,
-        #         RelativeRotation=False,
-        #     )
+            RotateInstrumentComponent(
+                Workspace=self.instrument,
+                ComponentName=component,
+                X=wx,
+                Y=wy,
+                Z=wz,
+                Angle=theta,
+                RelativeRotation=False,
+            )
 
-        # ApplyInstrumentToPeaks(
-        #     InputWorkspace="peaks",
-        #     InstrumentWorkspace=self.instrument,
-        #     OutputWorkspace="peaks",
-        # )
+        ApplyInstrumentToPeaks(
+            InputWorkspace="peaks",
+            InstrumentWorkspace=self.instrument,
+            OutputWorkspace="peaks",
+        )
 
         CloneWorkspace(InputWorkspace="peaks", OutputWorkspace="peaks_ws")
 
@@ -477,10 +507,8 @@ class Calibration:
             run = peak.getRunNumber()
             R = self.goniometer_dict[run]
             omega, chi, phi = self.calculate_goniometer_angles(R)
-            Rp = self.calculate_goniometer_matrix(
-                omega + omega_off, chi + chi_off, phi
-            )
-            peak.setGoniometerMatrix(G @ Rp)
+            Rp = self.calculate_goniometer_matrix(omega, chi + chi_off, phi)
+            peak.setGoniometerMatrix(G_gon @ Rp)
 
         CalculateUMatrix(
             PeaksWorkspace="peaks_ws",
@@ -501,36 +529,36 @@ class Calibration:
 
         DeleteWorkspace(Workspace="peaks_ws")
 
-        # SCDCalibratePanels(
-        #     PeakWorkspace="peaks",
-        #     RecalculateUB=False,
-        #     Tolerance=0.2,
-        #     a=self.a,
-        #     b=self.b,
-        #     c=self.c,
-        #     alpha=self.alpha,
-        #     beta=self.beta,
-        #     gamma=self.gamma,
-        #     OutputWorkspace="calibration_table",
-        #     DetCalFilename=self._get_ouput(".DetCal"),
-        #     CSVFilename=self._get_ouput(".csv"),
-        #     XmlFilename=self._get_ouput(".xml"),
-        #     CalibrateT0=False,
-        #     SearchRadiusT0=0,
-        #     CalibrateL1=False,
-        #     SearchRadiusL1=0.0,
-        #     CalibrateBanks=False,
-        #     SearchRadiusTransBank=0.0,
-        #     SearchRadiusRotXBank=0,
-        #     SearchRadiusRotYBank=0,
-        #     SearchRadiusRotZBank=0,
-        #     VerboseOutput=True,
-        #     SearchRadiusSamplePos=0.0,
-        #     TuneSamplePosition=False,
-        #     CalibrateSize=False,
-        #     SearchRadiusSize=0.0,
-        #     FixAspectRatio=True,
-        # )
+        SCDCalibratePanels(
+            PeakWorkspace="peaks",
+            RecalculateUB=False,
+            Tolerance=0.2,
+            a=self.a,
+            b=self.b,
+            c=self.c,
+            alpha=self.alpha,
+            beta=self.beta,
+            gamma=self.gamma,
+            OutputWorkspace="calibration_table",
+            DetCalFilename=self._get_ouput(".DetCal"),
+            CSVFilename=self._get_ouput(".csv"),
+            XmlFilename=self._get_ouput(".xml"),
+            CalibrateT0=False,
+            SearchRadiusT0=0,
+            CalibrateL1=False,
+            SearchRadiusL1=0.0,
+            CalibrateBanks=False,
+            SearchRadiusTransBank=0.0,
+            SearchRadiusRotXBank=0,
+            SearchRadiusRotYBank=0,
+            SearchRadiusRotZBank=0,
+            VerboseOutput=True,
+            SearchRadiusSamplePos=0.0,
+            TuneSamplePosition=False,
+            CalibrateSize=False,
+            SearchRadiusSize=0.0,
+            FixAspectRatio=True,
+        )
 
         ClearInstrumentParameters(Workspace=self.instrument)
 
@@ -538,14 +566,7 @@ class Calibration:
             Workspace=self.instrument,
             ParameterName="goniometer-tilt",
             ParameterType="String",
-            Value=",".join(G.astype(str).flatten().tolist()),
-        )
-
-        SetInstrumentParameter(
-            Workspace=self.instrument,
-            ParameterName="omega-offset",
-            ParameterType="Number",
-            Value=str(omega_off),
+            Value=",".join(G_gon.astype(str).flatten().tolist()),
         )
 
         SetInstrumentParameter(
@@ -637,6 +658,26 @@ class Calibration:
                 pdf.savefig(fig)
                 plt.close()
 
+        PreprocessDetectorsToMD(
+            InputWorkspace=self.instrument, OutputWorkspace="detectors"
+        )
+
+        tt = np.array(mtd["detectors"].column(2))
+        az = np.array(mtd["detectors"].column(3))
+
+        kf_x = np.sin(tt) * np.cos(az)
+        kf_y = np.sin(tt) * np.sin(az)
+        kf_z = np.cos(tt)
+
+        gamma = np.rad2deg(np.arctan2(kf_x, kf_z))
+        nu = np.rad2deg(np.arcsin(kf_y))
+
+        fig, ax = plt.subplots(1, 1, figsize=(16, 9), dpi=100)
+        ax.scatter(gamma, nu, c="lightgray", rasterized=True)
+        ax.set_aspect(1)
+        ax.minorticks_on()
+        fig.savefig(self._get_ouput("_instrument_{}.pdf".format(iteration)))
+
     def refine_goniometer(self):
         self.peak_dict = {}
 
@@ -679,28 +720,32 @@ class Calibration:
         return self.optimize_goniometer()
 
     def calculate_goniometer_angles(self, R):
-        return (
-            scipy.spatial.transform.Rotation.from_matrix(R)
-            .as_euler("YZY", degrees=True)
-            .tolist()
-        )
+        return Rotation.from_matrix(R).as_euler("YZY", degrees=True).tolist()
 
     def calculate_goniometer_matrix(self, omega, chi, phi):
-        return scipy.spatial.transform.Rotation.from_euler(
+        return Rotation.from_euler(
             "YZY", [omega, chi, phi], degrees=True
         ).as_matrix()
 
     def calculate_orientation_matrix(self, u0, u1, u2):
-        return scipy.spatial.transform.Rotation.from_rotvec(
-            [u0, u1, u2], degrees=True
+        return Rotation.from_rotvec([u0, u1, u2], degrees=True).as_matrix()
+
+    def calculate_tilt_matrix(self, alpha, beta, gamma):
+        Gz, Gyx = self.calculate_tilt_matrices(alpha, beta, gamma)
+        return Gz @ Gyx
+
+    def calculate_tilt_matrices(self, alpha, beta, gamma):
+        Gz = Rotation.from_euler("Z", gamma, degrees=True).as_matrix()
+        Gyx = Rotation.from_euler(
+            "YX", [beta, alpha], degrees=True
         ).as_matrix()
 
-    def calculate_orientation_vector(self, U):
-        return scipy.spatial.transform.Rotation.from_matrix(U).as_rotvec(
-            degrees=True
-        )
+        return Gz, Gyx
 
-    def residual(self, x, peak_dict, func):
+    def calculate_orientation_vector(self, U):
+        return Rotation.from_matrix(U).as_rotvec(degrees=True)
+
+    def residual(self, x, peak_dict, func, gamma):
         phi, theta, omega, *params = func(x)
 
         B = self.B
@@ -708,21 +753,19 @@ class Calibration:
 
         UB = np.dot(U, B)
 
-        alpha, beta, gamma, omega_off, chi_off = params
+        alpha, beta, chi_off = params
 
-        G = self.calculate_orientation_matrix(alpha, beta, gamma)
+        G = self.calculate_tilt_matrix(alpha, beta, gamma)
 
         diff = []
 
         for i, run in enumerate(peak_dict.keys()):
             (omega, chi, phi), Q, hkl = peak_dict[run]
-            R = self.calculate_goniometer_matrix(
-                omega + omega_off, chi + chi_off, phi
-            )
+            R = self.calculate_goniometer_matrix(omega, chi + chi_off, phi)
             T = G @ R @ UB * 2 * np.pi
             diff += (np.einsum("ij,lj->li", T, hkl) - Q).flatten().tolist()
 
-        return diff + [omega_off]
+        return diff
 
     def fix_offsets(self, x):
         return *x, 0, 0
@@ -735,20 +778,21 @@ class Calibration:
 
         fun = self.refine_offsets if self.refine_off else self.fix_offsets
 
-        x0 = (phi, theta, omega) + (0,) * (3 + 2 * self.refine_off)
-        args = (self.peak_dict, fun)
+        gamma = self.gravity_angle()
+        print(gamma)
+
+        x0 = (phi, theta, omega) + (0,) * (2 + self.refine_off)
+        args = (self.peak_dict, fun, gamma)
 
         sol = scipy.optimize.least_squares(self.residual, x0=x0, args=args)
 
         phi, theta, omega, *params = fun(sol.x)
 
-        alpha, beta, gamma, omega_off, chi_off = params
+        alpha, beta, chi_off = params
 
-        G = self.calculate_orientation_matrix(alpha, beta, gamma)
+        mtd["goniometer"].addRow([alpha, beta, gamma, chi_off])
 
-        mtd["goniometer"].addRow([alpha, beta, gamma, omega_off, chi_off])
-
-        return G, omega_off, chi_off
+        return *self.calculate_tilt_matrices(alpha, beta, gamma), chi_off
 
     def run(self):
         self.load_instrument()

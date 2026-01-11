@@ -6,14 +6,15 @@ sys.path.append(directory)
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 import scipy.linalg
 import scipy.interpolate
+from scipy.spatial.transform import Rotation
 
 from lmfit import Minimizer, Parameters, fit_report
 
-from mantid.simpleapi import LoadNexus, mtd
+from mantid.simpleapi import LoadNexus, SaveNexus, mtd
 from mantid.geometry import (
     CrystalStructure,
     ReflectionGenerator,
@@ -23,7 +24,7 @@ from mantid.kernel import Atom, MaterialBuilder, V3D
 
 
 class NuclearStructureRefinement:
-    def __init__(self, cell, space_group, sites, filename, l_max=8):
+    def __init__(self, cell, space_group, sites, filename):
         self.sites = []
         for site in sites:
             atm, x, y, z, occ, U = site
@@ -32,8 +33,6 @@ class NuclearStructureRefinement:
 
         self.cell = cell
         self.space_group = space_group
-
-        self.l_max = l_max
 
         self.initialize_crystal_structure(self.sites)
         self.initialize_material()
@@ -402,14 +401,36 @@ class NuclearStructureRefinement:
     def add_absorption_extinction_parameters(self, params):
         params.add("param", value=0.1, min=np.finfo(float).eps, max=np.inf)
 
-        n_feat = self.fs.shape[1]
-        for i in range(n_feat):
+        for i in range(3):
             params.add(
                 "coeff_{}".format(i),
                 value=0.0,
-                min=-np.inf,
-                max=np.inf,
+                min=-180,
+                max=180,
+                vary=False,
             )
+
+        params.add(
+            "coeff_3",
+            value=0.1,
+            min=0.01,
+            max=1.0,
+            vary=False,
+        )
+        params.add(
+            "coeff_4",
+            value=1.0,
+            min=0.2,
+            max=5,
+            vary=False,
+        )
+        params.add(
+            "coeff_5",
+            value=1.0,
+            min=0.2,
+            max=5,
+            vary=False,
+        )
 
         self.params = params
 
@@ -432,46 +453,18 @@ class NuclearStructureRefinement:
         scale = params["scale"].value
 
         coeffs = np.array(
-            [
-                params["coeff_{}".format(i)].value
-                for i in range(self.fs.shape[1])
-            ]
+            [params["coeff_{}".format(i)].value for i in range(6)]
         )
 
         return sites, param, scale, coeffs
 
-    def real_spherical_harmonic(self, l, m, theta, phi):
-        x = np.cos(theta)
-        am = abs(m)
-
-        N = np.sqrt(
-            (2 * l + 1)
-            / (4 * np.pi)
-            * scipy.special.factorial(l - am)
-            / scipy.special.factorial(l + am)
-        )
-
-        P = scipy.special.lpmv(am, l, x)
-
-        if m > 0:
-            return np.sqrt(2) * N * P * np.cos(am * phi)
-        elif m < 0:
-            return np.sqrt(2) * N * P * np.sin(am * phi)
-        else:
-            return N * P
-
-    def feature_vector(self, theta, phi, l_max):
-        f = []
-        for l in range(0, l_max + 1, 2):
-            for m in range(-l, l + 1):
-                f.append(self.real_spherical_harmonic(l, m, theta, phi))
-        return np.asarray(f, float)
-
     def load_hkls(self, filename):
         LoadNexus(Filename=filename, OutputWorkspace="peaks")
 
+        self.UB = mtd["peaks"].sample().getOrientedLattice().getUB()
+
         lamdas, two_thetas, intensity, sigma = [], [], [], []
-        h, k, l, fs = [], [], [], []
+        h, k, l, ri_hat, sf_hat = [], [], [], [], []
 
         coverage_two_theta, coverage_az_phi = [], []
 
@@ -488,16 +481,6 @@ class NuclearStructureRefinement:
             ri = peak.getSourceDirectionSampleFrame()
             sf = peak.getDetectorDirectionSampleFrame()
 
-            two_theta_ri = np.arccos(np.clip(ri[2], -1.0, 1.0))
-            az_phi_ri = np.arctan2(ri[1], ri[0])
-
-            two_theta_sf = np.arccos(np.clip(sf[2], -1.0, 1.0))
-            az_phi_sf = np.arctan2(sf[1], sf[0])
-
-            ri_vec = self.feature_vector(two_theta_ri, az_phi_ri, self.l_max)
-            sf_vec = self.feature_vector(two_theta_sf, az_phi_sf, self.l_max)
-            f = 0.5 * (ri_vec + sf_vec)
-
             I = peak.getIntensity()
             sig = peak.getSigmaIntensity()
 
@@ -512,10 +495,8 @@ class NuclearStructureRefinement:
                 intensity.append(I)
                 sigma.append(sig)
 
-                fs.append(f)
-
-                coverage_two_theta.extend([two_theta_ri, two_theta_sf])
-                coverage_az_phi.extend([az_phi_ri, az_phi_sf])
+                ri_hat.append(ri)
+                sf_hat.append(sf)
 
         scale_factor = 10000 / np.nanpercentile(intensity, 99)
 
@@ -543,7 +524,8 @@ class NuclearStructureRefinement:
         self.two_theta = np.array(two_thetas)[mask]
         self.Tbar = np.zeros_like(lamdas)[mask]
 
-        self.fs = np.array(fs)[mask]
+        self.ri_hat = np.array(ri_hat)[mask]
+        self.sf_hat = np.array(sf_hat)[mask]
 
         self.two_theta_coverage = np.asarray(coverage_two_theta, float)
         self.az_phi_coverage = np.asarray(coverage_az_phi, float)
@@ -619,178 +601,6 @@ class NuclearStructureRefinement:
 
         return (Fs * Fs.conj())[self.inverse].real
 
-    def plot_sample_shape(
-        self,
-        n_theta=40,
-        n_phi=40,
-        elev=20,
-        azim=30,
-        coverage_angle_deg=1.0,
-    ):
-        R = self.R
-        coeffs = self.coeffs
-
-        two_theta = np.linspace(0, np.pi, n_theta)
-        az_phi = np.linspace(0, 2 * np.pi, n_phi)
-        two_theta, az_phi = np.meshgrid(two_theta, az_phi)
-
-        x = R * np.sin(two_theta) * np.cos(az_phi)
-        y = R * np.sin(two_theta) * np.sin(az_phi)
-        z = R * np.cos(two_theta)
-
-        coeffs = np.asarray(coeffs, float)
-        tt_flat = two_theta.ravel()
-        az_flat = az_phi.ravel()
-        feats = np.array(
-            [
-                self.feature_vector(tt, az, self.l_max)
-                for tt, az in zip(tt_flat, az_flat)
-            ]
-        )
-        A_ani = 1.0 + feats @ coeffs
-        A_ani = np.clip(
-            A_ani.reshape(two_theta.shape),
-            np.finfo(float).eps,
-            np.finfo(float).max,
-        )
-
-        material = self.material
-        n = material.numberDensityEffective
-        sigma_tot = material.totalScatterXSection()
-        sigma_abs = material.absorbXSection(np.median(self.lamda))
-        mu = n * (sigma_tot + sigma_abs)
-
-        muR = mu * R / 10.0
-        A_iso = self.spherical_absorption_correction(muR, two_theta)
-
-        T_dir = A_iso / A_ani
-
-        T_plot = T_dir.copy()
-
-        two_theta_cov = getattr(self, "two_theta_coverage", None)
-        az_phi_cov = getattr(self, "az_phi_coverage", None)
-
-        if (
-            two_theta_cov is not None
-            and az_phi_cov is not None
-            and two_theta_cov.size
-        ):
-            ux = x / R
-            uy = y / R
-            uz = z / R
-            grid_dirs = np.stack([ux.ravel(), uy.ravel(), uz.ravel()], axis=1)
-
-            cx = np.sin(two_theta_cov) * np.cos(az_phi_cov)
-            cy = np.sin(two_theta_cov) * np.sin(az_phi_cov)
-            cz = np.cos(two_theta_cov)
-            cov_dirs = np.stack([cx, cy, cz], axis=1)
-
-            cosang = cov_dirs @ grid_dirs.T
-            max_cos = np.max(cosang, axis=0)
-
-            min_cos = np.cos(np.deg2rad(coverage_angle_deg))
-            covered = (max_cos >= min_cos).reshape(two_theta.shape)
-
-            T_plot[~covered] = np.nan
-
-        fig = plt.figure(layout="constrained")
-        gs = fig.add_gridspec(2, 2, hspace=0.15, wspace=0.15)
-
-        ax3d = fig.add_subplot(gs[0, 0], projection="3d")
-        ax_xy = fig.add_subplot(gs[0, 1])
-        ax_xz = fig.add_subplot(gs[1, 0])
-        ax_yz = fig.add_subplot(gs[1, 1])
-
-        if np.isfinite(T_plot).any():
-            vmin = np.nanmin(T_plot)
-            vmax = np.nanmax(T_plot)
-        else:
-            vmin = np.min(T_dir)
-            vmax = np.max(T_dir)
-
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        cmap = plt.cm.viridis
-        facecolors = cmap(norm(T_plot))
-        ax3d.plot_surface(
-            x,  # horizontal axis: x
-            z,  # depth axis: z
-            y,  # vertical axis: y
-            rstride=1,
-            cstride=1,
-            facecolors=facecolors,
-            linewidth=0,
-            antialiased=False,
-        )
-
-        ax_xy.pcolormesh(
-            x,
-            y,
-            T_plot,
-            shading="auto",
-            cmap=cmap,
-            norm=norm,
-        )
-
-        ax_xz.pcolormesh(
-            x,
-            z,
-            T_plot,
-            shading="auto",
-            cmap=cmap,
-            norm=norm,
-        )
-
-        ax_yz.pcolormesh(
-            z,
-            y,
-            T_plot,
-            shading="auto",
-            cmap=cmap,
-            norm=norm,
-        )
-
-        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-        mappable.set_array(T_plot)
-        fig.colorbar(
-            mappable,
-            ax=[ax3d, ax_xy, ax_xz, ax_yz],
-            shrink=0.7,
-            label=r"$A_\mathrm{iso}/A_\mathrm{ani}$",
-        )
-
-        lim = 1.1 * R
-        ax3d.set_xlim(-lim, lim)
-        ax3d.set_ylim(-lim, lim)
-        ax3d.set_zlim(-lim, lim)
-        ax3d.set_xlabel(r"$x$ [mm]")
-        ax3d.set_ylabel(r"$z$ [mm]")
-        ax3d.set_zlabel(r"$y$ [mm]")
-        ax3d.set_box_aspect([1, 1, 1])
-        ax3d.set_aspect("equal")
-
-        ax_xy.set_xlim(-lim, lim)
-        ax_xy.set_ylim(-lim, lim)
-        ax_xy.set_xlabel(r"$x$ [mm]")
-        ax_xy.set_ylabel(r"$y$ [mm]")
-        ax_xy.set_aspect("equal")
-
-        ax_xz.set_xlim(-lim, lim)
-        ax_xz.set_ylim(-lim, lim)
-        ax_xz.set_xlabel(r"$x$ [mm]")
-        ax_xz.set_ylabel(r"$z$ [mm]")
-        ax_xz.set_aspect("equal")
-
-        ax_yz.set_xlim(-lim, lim)
-        ax_yz.set_ylim(-lim, lim)
-        ax_yz.set_xlabel(r"$z$ [mm]")
-        ax_yz.set_ylabel(r"$y$ [mm]")
-        ax_yz.set_aspect("equal")
-
-        ax3d.view_init(elev=elev, azim=azim)
-
-        output = os.path.splitext(self.filename)[0]
-        fig.savefig(output + "_sample_shape.pdf", bbox_inches="tight")
-
     def chemical_formula_z_parameter(self):
         sg = self.crystal_structure.getSpaceGroup()
 
@@ -853,31 +663,6 @@ class NuclearStructureRefinement:
     def spherical_absorption_correction(self, muR, two_theta):
         return self.f(muR, two_theta, grid=False)
 
-    def initialize_correction(self, R=0, model="type II"):
-        material = self.material
-        n = material.numberDensityEffective
-        sigma_tot = material.totalScatterXSection()
-        sigma_abs = [material.absorbXSection(lamda) for lamda in self.lamda]
-
-        self.mu = n * (sigma_tot + np.array(sigma_abs))
-        muR = self.mu * R / 10
-
-        self.A_sph = self.spherical_absorption_correction(muR, self.two_theta)
-
-        self.model = model
-
-        self.c1 = self.f1[self.model](self.two_theta)
-        self.c2 = self.f2[self.model](self.two_theta)
-
-    def absorption_correction(self, coeffs):
-        A_ani = np.clip(
-            1 + self.fs @ coeffs, np.finfo(float).eps, np.finfo(float).max
-        )
-        self.T = self.A_sph / A_ani
-        self.Tbar = -np.log(self.T) / self.mu
-
-        return self.T
-
     def spherical_extinction(self):
         f1 = {}
         f2 = {}
@@ -916,20 +701,35 @@ class NuclearStructureRefinement:
         self.f2 = f2
 
     def extinction_xs(self, g, F2, two_theta, lamda, Tbar, V):
-        a = 1e-5
-
-        xs = a**2 / V**2 * lamda**3 * g / np.sin(two_theta) * Tbar * F2
+        k = 1e2
+        xs = k / V**2 * lamda**3 * g / np.sin(two_theta) * Tbar * F2
 
         return xs
 
     def extinction_xp(self, r2, F2, lamda, V):
-        a = 1e-5
-
-        xp = a**2 / V**2 * lamda**2 * r2 * F2
+        k = 1e10  # dimensionless
+        xp = k / V**2 * lamda**2 * r2 * F2
 
         return xp
 
     def extinction_correction(self, param, F2):
+        """
+        Calculate structure factor-dependent extinction correction.
+
+
+        Parameters
+        ----------
+        param : float
+            Exinction parameter.
+        F2 : array
+            Structure factors (fm^2).
+
+        Returns
+        -------
+        y : array
+            Extinction (unit less).
+
+        """
         two_theta = self.two_theta
         lamda = self.lamda
         Tbar = self.Tbar
@@ -1006,12 +806,14 @@ class NuclearStructureRefinement:
 
         wr = (scale * I_calc - self.I_obs) / self.sig
 
-        return np.concatenate((wr, self.T - 1))
+        # num = np.nansum(wr**2)
+        # den = np.nansum((self.I_obs / self.sig) ** 2)
+        # Rw = np.sqrt(num / den) if den > 0 else 1.0
 
-    def refine(self, R=1, report=True, cutoff=10, n_iter=3):
-        self.R = R
+        return wr
 
-        self.initialize_correction(R)
+    def refine(self, report=True, cutoff=10, n_iter=3):
+        self.initialize_correction()
 
         fixed = []
         for name, par in self.params.items():
@@ -1040,7 +842,7 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq")
+            result = out.minimize(method="leastsq", max_nfev=100)
 
             if report:
                 print(
@@ -1052,6 +854,10 @@ class NuclearStructureRefinement:
             self.params = result.params
 
             self.F2s = self.calculate_structure_factors(self.params)
+
+            self.params = result.params
+
+            self.calculate_statistics(cutoff)
 
             # --- Stage 2: absorption/extinction only
             params = self.params.copy()
@@ -1068,7 +874,7 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq")
+            result = out.minimize(method="leastsq", max_nfev=100)
 
             if report:
                 print(
@@ -1079,6 +885,15 @@ class NuclearStructureRefinement:
 
             self.params = result.params
 
+            self.calculate_statistics(cutoff)
+
+            self.plot_result()
+
+            self.plot_sample_shape()
+
+        self.save_corrected_peaks()
+
+    def calculate_statistics(self, cutoff):
         params = self.extract_parameters(self.params)
 
         self.sites, self.param, self.scale, self.coeffs = params
@@ -1100,31 +915,19 @@ class NuclearStructureRefinement:
         F_calc = np.sqrt(self.I_calc / scale)
         F_sig = 0.5 * self.sig / np.sqrt(self.I_obs * scale)
 
-        # F2_obs = self.I_obs / (scale * y)
-        # F2_sig = self.sig / (scale * y)
-        # F2_calc = F2s.copy()
-
         mask = np.abs(F_calc - F_obs) < cutoff * F_sig
 
-        w = np.bincount(self.inverse[mask], weights=1 / F_sig[mask] ** 2)
+        inverse = self.inverse[mask]
 
-        F_obs = (
-            np.bincount(
-                self.inverse[mask], weights=F_obs[mask] / F_sig[mask] ** 2
-            )
-            / w
-        )
-        F_calc = (
-            np.bincount(
-                self.inverse[mask], weights=F_calc[mask] / F_sig[mask] ** 2
-            )
-            / w
-        )
+        F_sig = F_sig[mask]
+        F_obs = F_obs[mask]
+        F_calc = F_calc[mask]
+
+        w = np.bincount(inverse, weights=1 / F_sig**2)
+
+        F_obs = np.bincount(inverse, weights=F_obs / F_sig**2) / w
+        F_calc = np.bincount(inverse, weights=F_calc / F_sig**2) / w
         F_sig = 1 / np.sqrt(w)
-
-        # F_obs = np.sqrt(F2_obs)
-        # F_calc = np.sqrt(F2_calc)
-        # F_sig = 0.5 * F2_sig / np.sqrt(F2_obs)
 
         mask = np.abs(F_calc - F_obs) < cutoff * F_sig
 
@@ -1132,11 +935,9 @@ class NuclearStructureRefinement:
         self.F_calc = F_calc[mask]
         self.F_sig = F_sig[mask]
 
-        self.R_ref = (
-            100
-            * np.nansum(np.abs(self.F_calc - self.F_obs))
-            / np.nansum(self.F_obs)
-        )
+        R = np.sum(np.abs(self.F_calc - self.F_obs)) / np.sum(self.F_obs)
+
+        self.R_ref = R * 100  # %
 
         print("R = {:.2f}%".format(self.R_ref))
 
@@ -1144,6 +945,8 @@ class NuclearStructureRefinement:
         output = os.path.splitext(self.filename)[0]
 
         F_lim = [np.min(self.F_obs), np.max(self.F_obs)]
+
+        R = self.R_ref
 
         fig, ax = plt.subplots(1, 1, layout="constrained")
         ax.plot(F_lim, F_lim, color="C1")
@@ -1156,7 +959,6 @@ class NuclearStructureRefinement:
             rasterized=True,
         )
         chemical_formula = self.chemical_formula.replace("-", " ")
-        R = self.R_ref
         ax.set_aspect(1)
         ax.minorticks_on()
         ax.set_xlim(*F_lim)
@@ -1165,6 +967,261 @@ class NuclearStructureRefinement:
         ax.set_xlabel(r"$|F|_\mathrm{calc}$")
         ax.set_ylabel(r"$|F|_\mathrm{obs}$")
         fig.savefig(output + "_ref.pdf", bbox_inches="tight")
+
+    def save_corrected_peaks(self):
+        """Apply absorption corrections to all peaks and save to new file."""
+        output = os.path.splitext(self.filename)[0] + "_corr.nxs"
+
+        LoadNexus(Filename=self.filename, OutputWorkspace="peaks_corr")
+
+        _, param, scale, coeffs = self.extract_parameters(self.params)
+
+        lamdas = []
+        two_thetas = []
+        ri_hat = []
+        sf_hat = []
+
+        for peak in mtd["peaks_corr"]:
+            lamda = peak.getWavelength()
+            two_theta = peak.getScattering()
+            ri = peak.getSourceDirectionSampleFrame()
+            sf = peak.getDetectorDirectionSampleFrame()
+
+            lamdas.append(lamda)
+            two_thetas.append(two_theta)
+            ri_hat.append(ri)
+            sf_hat.append(sf)
+
+        material = self.material
+        n = material.numberDensityEffective
+        sigma_tot = material.totalScatterXSection()
+        sigma_abs = [material.absorbXSection(lamda) for lamda in lamdas]
+        mu = n * (sigma_tot + np.array(sigma_abs))
+
+        self.mu = mu
+        self.ri_hat = np.array(ri_hat)
+        self.sf_hat = np.array(sf_hat)
+
+        y_abs = self.absorption_correction(coeffs)
+
+        Tbar = self.Tbar.copy()
+
+        for idx, peak in enumerate(mtd["peaks_corr"]):
+            I = peak.getIntensity()
+            sig = peak.getSigmaIntensity()
+
+            I_corr = I / y_abs[idx]
+            sig_corr = sig / y_abs[idx]
+
+            peak.setIntensity(I_corr)
+            peak.setSigmaIntensity(sig_corr)
+            peak.setAbsorptionWeightedPathLength(Tbar[idx])
+
+        SaveNexus(InputWorkspace="peaks_corr", Filename=output)
+
+    def plot_sample_shape(self):
+        """Plot the refined ellipsoidal sample shape with beam directions."""
+        output = os.path.splitext(self.filename)[0]
+
+        alpha, beta, gamma, scale, ratio_b, ratio_c = self.coeffs
+
+        a = scale * 10
+        b = scale * ratio_b * 10
+        c = scale * ratio_c * 10
+
+        u = np.linspace(0, 2 * np.pi, 9)
+        v = np.arccos(np.linspace(-1, 1, 9))
+        U, V = np.meshgrid(u, v)
+
+        X = a * np.sin(V) * np.cos(U)
+        Y = b * np.sin(V) * np.sin(U)
+        Z = c * np.cos(V)
+
+        R = Rotation.from_euler(
+            "xyz", [alpha, beta, gamma], degrees=True
+        ).as_matrix()
+        coords = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
+        rotated = coords @ R.T
+
+        X_rot = rotated[:, 0].reshape(X.shape)
+        Y_rot = rotated[:, 1].reshape(Y.shape)
+        Z_rot = rotated[:, 2].reshape(Z.shape)
+
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+
+        ax.plot_surface(
+            X_rot,
+            Y_rot,
+            Z_rot,
+            cmap="viridis",
+            antialiased=True,
+        )
+
+        max_range = max(a, b, c)
+        ax.set_xlim([-max_range, max_range])
+        ax.set_ylim([-max_range, max_range])
+        ax.set_zlim([-max_range, max_range])
+
+        ax.contour(
+            X_rot, Y_rot, Z_rot, zdir="x", offset=-max_range, cmap="binary"
+        )
+        ax.contour(
+            X_rot, Y_rot, Z_rot, zdir="y", offset=-max_range, cmap="binary"
+        )
+        ax.contour(
+            X_rot, Y_rot, Z_rot, zdir="z", offset=-max_range, cmap="binary"
+        )
+
+        ax.grid(False)
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+
+        ax.set_xlabel("X [mm]")
+        ax.set_ylabel("Y [mm]")
+        ax.set_zlabel("Z [mm]")
+        ax.set_title(
+            f"Sample Shape (a={a:.3f}, b={b:.3f}, c={c:.3f} mm)\n"
+            f"Orientation: α={alpha:.1f}°, β={beta:.1f}°, γ={gamma:.1f}°"
+        )
+        ax.set_box_aspect([1, 1, 1])
+
+        colors = ["r", "g", "b"]
+        origin = (
+            ax.get_xlim3d()[1],
+            ax.get_ylim3d()[1],
+            ax.get_zlim3d()[1],
+        )
+        origin = (0, 0, 0)
+        factor = max_range / 4
+        offset = max_range / 2
+
+        for j in range(3):
+            v = self.UB[:, j]
+            vector = v / np.linalg.norm(v)
+            ax.quiver(
+                origin[0] + offset,
+                origin[1] + offset,
+                origin[2] + offset,
+                vector[0],
+                vector[1],
+                vector[2],
+                length=factor,
+                color=colors[j],
+                linestyle="-",
+                pivot="tail",
+            )
+
+            ax.view_init(vertical_axis="y", elev=27, azim=50)
+
+        plt.tight_layout()
+        fig.savefig(output + "_sample_shape.pdf", bbox_inches="tight", dpi=150)
+        plt.close(fig)
+
+    def calculate_ellipsoid_surface(self, coeffs):
+        alpha, beta, gamma, scale, ratio_b, ratio_c = coeffs
+
+        a = scale
+        b = scale * ratio_b
+        c = scale * ratio_c
+
+        R = Rotation.from_euler(
+            "xyz", [alpha, beta, gamma], degrees=True
+        ).as_matrix()
+
+        D = np.diag([1.0 / a**2, 1.0 / b**2, 1.0 / c**2])
+
+        return R @ D @ R.T
+
+    def absorption_correction(self, coeffs):
+        alpha, beta, gamma, scale, ratio_b, ratio_c = coeffs
+
+        a = scale
+        b = scale * ratio_b
+        c = scale * ratio_c
+
+        R = (
+            Rotation.from_euler("xyz", [alpha, beta, gamma], degrees=True)
+            .as_matrix()
+            .astype(np.float32)
+        )
+
+        D = np.diag([1.0 / a**2, 1.0 / b**2, 1.0 / c**2])
+        Q = R @ D @ R.T
+
+        S = (R @ np.diag([a, b, c])).astype(np.float32)
+        y = self.sample_points @ S.T
+        yQ = y @ Q
+        cquad = np.einsum("ij,ij->i", yQ, y) - 1.0
+
+        A, Tbar = self._absorption_factors(
+            self.mu.astype(np.float32),
+            Q,
+            yQ,
+            cquad,
+            self.ri_hat,
+            self.sf_hat,
+        )
+
+        self.T = np.clip(A, 1e-8, None)
+        self.Tbar = Tbar
+        return self.T
+
+    def prepare_absorption_table(self, N=50, seed=42, beta=3):
+        rng = np.random.default_rng(seed)
+
+        v = rng.normal(size=(N, 3))
+        v /= np.linalg.norm(v, axis=1, keepdims=True)
+
+        u = rng.random(N).astype(np.float32)
+        r = u ** (1.0 / beta)
+        p = v * r[:, None]
+
+        w = (3.0 / beta) * (r ** (3.0 - beta))
+
+        self.sample_points = p.astype(np.float32)
+        self.sample_weights = w.astype(np.float32)
+        self.N_mc = N
+
+    def initialize_correction(self, model="type I gaussian"):
+        material = self.material
+        n = material.numberDensityEffective
+        sigma_tot = material.totalScatterXSection()
+        sigma_abs = [material.absorbXSection(lamda) for lamda in self.lamda]
+        self.mu = n * (sigma_tot + np.array(sigma_abs))
+        self.model = model
+        self.c1 = self.f1[self.model](self.two_theta)
+        self.c2 = self.f2[self.model](self.two_theta)
+        self.prepare_absorption_table()
+
+    def _exit_lengths_for_directions(self, Q, yQ, cquad, dirs):
+        a = np.einsum("mi,ij,mj->m", dirs, Q, dirs)
+
+        b = 2 * (yQ @ dirs.T)
+
+        disc = b * b - 4 * (cquad[:, None] * a[None, :])
+        disc = np.maximum(disc, 0.0)
+
+        t = (-b + np.sqrt(disc)) / (2 * a[None, :])
+        return t
+
+    def _absorption_factors(self, mu, Q, yQ, cquad, n_in_rev, n_out_rev):
+        P = n_in_rev.shape[0]
+
+        dirs = np.vstack([n_in_rev, n_out_rev])
+        t = self._exit_lengths_for_directions(Q, yQ, cquad, dirs)
+
+        t1 = t[:, :P]
+        t2 = t[:, P:]
+        t_total = t1 + t2
+
+        w = np.exp(-t_total * mu[None, :])
+        A = w.mean(axis=0)
+
+        Tbar = (w * t_total).mean(axis=0) / A
+
+        return A, Tbar
 
 
 # ---
@@ -1193,6 +1250,7 @@ sites = [
 # ]
 
 nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-nuclear.refine(R=0.1, n_iter=1)
+nuclear.refine(n_iter=25)
 nuclear.plot_result()
 nuclear.plot_sample_shape()
+nuclear.save_corrected_peaks()

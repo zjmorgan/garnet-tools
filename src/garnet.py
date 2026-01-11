@@ -2,6 +2,9 @@ import os
 import sys
 import traceback
 
+import numpy as np
+import scipy.linalg
+
 os.environ["QT_API"] = "pyqt5"
 
 from qtpy.QtWidgets import (
@@ -2477,6 +2480,55 @@ class FormModel:
             "shared",
             "Vanadium",
         )
+
+    def load_UB(filename, beam=2, up=1, back=0):
+        UB = np.zeros((3, 3), dtype=float)
+
+        with open(filename, "r") as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+
+        if len(lines) < 3:
+            raise ValueError(
+                f"Expected at least 3 non-empty lines, got {len(lines)}"
+            )
+
+        for basis in range(3):
+            parts = lines[basis].split()
+            if len(parts) < 3:
+                raise ValueError(
+                    f"Line {basis+1} has less than 3 columns: {lines[basis]!r}"
+                )
+
+            b, bk, u = map(float, parts[:3])
+
+            UB[beam, basis] = b
+            UB[back, basis] = bk
+            UB[up, basis] = u
+
+        return UB
+
+    def autolim(UB, W, d_min):
+        s_max = 1 / d_min
+
+        T = np.linalg.inv(UB @ W)
+
+        X_max = np.floor(T @ [s_max, 0, 0])
+        Y_max = np.floor(T @ [0, s_max, 0])
+        Z_max = np.floor(T @ [0, 0, s_max])
+
+        return X_max, Y_max, Z_max
+
+    def estimate_projection(self, UB):
+        UB_inv = np.linalg.inv(UB)
+
+        vert = UB_inv @ [0, 1, 0]
+        vert /= np.abs(vert).max()
+
+        A = [[0, 1, 0]] @ UB
+        beam, horz = scipy.linalg.null_space(A).T
+
+        beam /= np.abs(beam).max()
+        horz /= np.abs(horz).max()
 
 
 class Garnet(QMainWindow):
