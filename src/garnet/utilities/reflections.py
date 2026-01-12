@@ -70,6 +70,7 @@ from PyPDF2 import PdfMerger
 import argparse
 
 from garnet.reduction.ub import Optimization
+from garnet.utilties.macromolecular import Macromolecular
 
 point_group_dict = {
     "-1": "-1 (Triclinic)",

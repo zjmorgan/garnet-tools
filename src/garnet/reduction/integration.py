@@ -3559,7 +3559,10 @@ class PeakEllipsoid:
 
         d_min, d_max = 0, np.inf
         if np.sum(shell) > 0:
-            d_min, d_max = np.nanpercentile(d[shell], [25, 75])
+            d_med = np.nanmedian(d[shell])
+            d_mad = np.nanmedian(np.abs(d[shell] - d_med))
+            k = 1 / scipy.stats.norm.ppf(0.75)
+            d_min, d_max = d_med - k * d_mad, d_med + k * d_max
 
         shell = bkg & (n > 0) & (d >= d_min) & (d <= d_max)
 
@@ -3600,15 +3603,6 @@ class PeakEllipsoid:
 
         ratio = vol_pk / vol_bkg if vol_bkg > 0 else 0
 
-        # pk_intens = vol_pk * pk_cnts / pk_norm
-        # bkg_intens = vol_bkg * bkg_cnts / bkg_norm
-
-        # pk_err = vol_pk * np.sqrt(pk_cnts) / pk_norm
-        # bkg_err = vol_bkg * np.sqrt(bkg_cnts) / bkg_norm
-
-        # intens = pk_intens - ratio * bkg_intens  # / frac
-        # sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2)  # / frac
-
         pk_intens = pk_cnts
         bkg_intens = bkg_cnts
 
@@ -3621,48 +3615,8 @@ class PeakEllipsoid:
         intens = vol * raw_intens / pk_norm
         sig = vol * raw_sig / pk_norm
 
-        # pk_intens = np.nansum(d_pk / n_pk)
-        # bkg_intens = np.nansum(d_bkg / n_bkg)
-
-        # pk_err = np.sqrt(np.nansum(d_pk / n_pk**2))
-        # bkg_err = np.sqrt(np.nansum(d_bkg / n_bkg**2))
-
-        # intens = pk_intens - ratio * bkg_intens # / frac
-        # sig = np.sqrt(pk_err**2 + ratio**2 * bkg_err**2) # / frac
-
         if not sig > 0:
             sig = float("-inf")
-
-        # mask = core | shell
-
-        # y = d / n
-        # e = np.sqrt(d) / n
-
-        # y[np.isinf(y)] = np.nan
-        # e[np.isinf(e)] = np.nan
-
-        # w = 1 / e**2
-        # w[np.isinf(e)] = np.nan
-
-        # S = np.nansum(w[mask])
-        # Sx = np.nansum(kernel[mask] * w[mask])
-        # Sy = np.nansum(y[mask] * w[mask])
-        # Sxx = np.nansum(kernel[mask] ** 2 * w[mask])
-        # Sxy = np.nansum(kernel[mask] * y[mask] * w[mask])
-        # D = S * Sxx - Sx**2
-
-        # c = (S * Sxy - Sx * Sy) / D
-        # b = (Sxx * Sy - Sx * Sxy) / D
-        # s = np.sqrt(S / D)
-
-        # n_mask = np.nansum(mask)
-        # if n_mask <= 2:
-        #     n_mask = np.inf
-
-        # chi_2_dof = np.nansum((y - c * kernel - b) ** 2) / (n_mask - 2)
-
-        # if c < 3 * s * np.sqrt(chi_2_dof) and chi_2_dof > 0:
-        #     intens = sig
 
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 

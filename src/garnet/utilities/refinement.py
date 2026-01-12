@@ -41,7 +41,12 @@ class NuclearStructureRefinement:
 
         self.load_hkls(filename)
 
-        self.models = ["type I gaussian", "type I lorentzian", "type II"]
+        self.models = [
+            "type I gaussian",
+            "type I lorentzian",
+            "type II",
+            "shelx",
+        ]
 
         self.generate_parameters()
         self.spherical_extinction()
@@ -701,20 +706,41 @@ class NuclearStructureRefinement:
         self.f2 = f2
 
     def extinction_xs(self, g, F2, two_theta, lamda, Tbar, V):
-        k = 1e2
+        k = 1e2  # g -> dimensionless
         xs = k / V**2 * lamda**3 * g / np.sin(two_theta) * Tbar * F2
 
         return xs
 
     def extinction_xp(self, r2, F2, lamda, V):
-        k = 1e10  # dimensionless
+        k = 1e2  #  r2^2 -> um^2
         xp = k / V**2 * lamda**2 * r2 * F2
 
         return xp
 
+    def extinction_xx(self, x, F2, two_theta, lamda, V):
+        k = 1e2  # x -> cm
+        xx = k / V**2 * lamda**3 * x / np.sin(two_theta) * F2
+
+        return xx
+
     def extinction_correction(self, param, F2):
         """
         Calculate structure factor-dependent extinction correction.
+
+        +------------------------+------------------+-----------------------+
+        | Model                  | Nature           | Parameter             |
+        +========================+==================+=======================+
+        | ``Type I, Gaussian``   | Secondary        | Mosaic [unitless]     |
+        +------------------------+------------------+-----------------------+
+        | ``Type I, Lorentzian`` | Secondary        | Mosaic [unitless]     |
+        +------------------------+------------------+-----------------------+
+        | ``Type II``            | Primary          | Block size² [um²]     |
+        +------------------------+------------------+-----------------------+
+        | ``SHELX``              | Phenomenological | Crystal size [cm]     |
+        +------------------------+------------------+-----------------------+
+        [1] P. J. Becker and P. Coppens, Acta Cryst A 30, 2 (1974).
+        [2] P. J. Becker and P. Coppens, Acta Cryst A 30, 2 (1974).
+        [3] A. C. Larson, Crystallographic Computing (1970).
 
 
         Parameters
@@ -727,22 +753,27 @@ class NuclearStructureRefinement:
         Returns
         -------
         y : array
-            Extinction (unit less).
+            Extinction (unitless).
 
         """
+
         two_theta = self.two_theta
         lamda = self.lamda
         Tbar = self.Tbar
 
         V = self.V
-        if self.model == "type II":
+        if self.model.lower() == "type ii":
             xp = self.extinction_xp(param, F2, lamda, V)
             yp = 1 / (1 + self.c1 * xp**self.c2)
             return yp
-        else:
+        elif self.model.lower().startswith("type ii"):
             xs = self.extinction_xs(param, F2, two_theta, lamda, Tbar, V)
             ys = 1 / (1 + self.c1 * xs**self.c2)
             return ys
+        else:  # shelx
+            xx = self.extinction_xx(param, F2, two_theta, lamda, V)
+            yx = 1 / np.sqrt(1 + xx)
+            return yx
 
     def cost(self, params, F2s, I_obs, sig):
         s = params["scale"].value
@@ -774,7 +805,8 @@ class NuclearStructureRefinement:
         return scale
 
     def objective_structure(self, params):
-        """Objective for structure + scale refinement.
+        """
+        Objective for structure + scale refinement.
 
         This stage varies positional, occupancy and displacement
         parameters together with the overall scale, while using the
@@ -790,7 +822,8 @@ class NuclearStructureRefinement:
         return (scale * I_calc - self.I_obs) / self.sig
 
     def objective_correction(self, params):
-        """Objective for absorption/extinction refinement.
+        """
+        Objective for absorption/extinction refinement.
 
         Structure and scale are held fixed; F2s are precomputed for the
         current structural model.
@@ -859,10 +892,10 @@ class NuclearStructureRefinement:
 
             self.calculate_statistics(cutoff)
 
-            # --- Stage 2: absorption/extinction only
+            # --- Stage 2: absorption only
             params = self.params.copy()
             for name, par in params.items():
-                if name.startswith("coeff_") or name == "param":
+                if name.startswith("coeff_"):
                     par.vary = True
                 else:
                     par.vary = False
@@ -877,10 +910,30 @@ class NuclearStructureRefinement:
             result = out.minimize(method="leastsq", max_nfev=100)
 
             if report:
-                print(
-                    f"Iteration {i + 1}/{n_iter} - "
-                    "Stage 2 (absorption/extinction)"
-                )
+                print(f"Iteration {i + 1}/{n_iter} - " "Stage 2 (absorption)")
+                print(fit_report(result))
+
+            self.params = result.params
+
+            # --- Stage 3: extinction only
+            params = self.params.copy()
+            for name, par in params.items():
+                if name == "param":
+                    par.vary = True
+                else:
+                    par.vary = False
+
+            out = Minimizer(
+                self.objective_correction,
+                params,
+                nan_policy="omit",
+                reduce_fcn=None,
+            )
+
+            result = out.minimize(method="leastsq", max_nfev=100)
+
+            if report:
+                print(f"Iteration {i + 1}/{n_iter} - " "Stage 3 (extinction)")
                 print(fit_report(result))
 
             self.params = result.params
@@ -1184,7 +1237,7 @@ class NuclearStructureRefinement:
         self.sample_weights = w.astype(np.float32)
         self.N_mc = N
 
-    def initialize_correction(self, model="type I gaussian"):
+    def initialize_correction(self, model="type II"):
         material = self.material
         n = material.numberDensityEffective
         sigma_tot = material.totalScatterXSection()
@@ -1228,6 +1281,8 @@ class NuclearStructureRefinement:
 
 # filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
 filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
+
 
 cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
 space_group = "I a -3 d"

@@ -75,7 +75,7 @@ class Calibration:
 
         self.refine_off = defaults.get("RefineGoniometer")
 
-        self.interations = 1
+        self.iterations = 3
 
     def load_peaks(self):
         ext = os.path.splitext(self.peaks)[1]
@@ -658,6 +658,8 @@ class Calibration:
                 pdf.savefig(fig)
                 plt.close()
 
+                self.d_dict = d_dict
+
         PreprocessDetectorsToMD(
             InputWorkspace=self.instrument, OutputWorkspace="detectors"
         )
@@ -676,6 +678,8 @@ class Calibration:
         ax.scatter(gamma, nu, c="lightgray", rasterized=True)
         ax.set_aspect(1)
         ax.minorticks_on()
+        ax.set_xlabel(r"$\gamma$ [$^\circ$]")
+        ax.set_ylabel(r"$\nu$ [$^\circ$]")
         fig.savefig(self._get_ouput("_instrument_{}.pdf".format(iteration)))
 
     def refine_goniometer(self):
@@ -779,7 +783,6 @@ class Calibration:
         fun = self.refine_offsets if self.refine_off else self.fix_offsets
 
         gamma = self.gravity_angle()
-        print(gamma)
 
         x0 = (phi, theta, omega) + (0,) * (2 + self.refine_off)
         args = (self.peak_dict, fun, gamma)
@@ -798,12 +801,12 @@ class Calibration:
         self.load_instrument()
         self.load_peaks()
         self.reindex_peaks()
-        for iteration in range(self.interations):
+        for iteration in range(self.iterations):
             self.initialize_peaks()
             self.generate_diagnostic(iteration)
             self.calibrate_instrument(iteration)
             self.calibrate_goniometer(iteration)
-        self.generate_diagnostic(self.interations)
+        self.generate_diagnostic(self.iterations)
 
 
 if __name__ == "__main__":

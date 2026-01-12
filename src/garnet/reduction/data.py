@@ -1428,7 +1428,7 @@ class LaueData(BaseDataModel):
                 inst = mtd["goniometer"].getInstrument()
                 run = mtd[event_name].run()
 
-                params = ["omega-offset", "chi-offset"]
+                params = ["omega-offset", "chi-offset", "phi-offset"]
 
                 for i, param in enumerate(params):
                     if inst.hasParameter(param):
@@ -1894,15 +1894,13 @@ class LaueData(BaseDataModel):
                 OutputWorkspace="bkg",
             )
 
-            Q_min_vals, Q_max_vals = self.get_min_max_values()
-
             self.convert_to_Q_lab("bkg", "bkg_md")
 
             DeleteWorkspace(Workspace="bkg")
 
     def normalize_to_hkl(self, md, projections, extents, bins, symmetry=None):
         """
-        Normalizae to binned hkl.
+        Normalize to binned hkl.
 
         Parameters
         ----------

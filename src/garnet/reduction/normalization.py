@@ -155,11 +155,11 @@ class Normalization(SubPlan):
                 self.plan.get("GoniometerCalibration"),
             )
 
+            data.preprocess_detectors("data")
+
             data.apply_mask("data", self.plan.get("MaskFile"))
 
             data.crop_for_normalization("data")
-
-            data.preprocess_detectors("data")
 
             data.load_background(self.plan.get("BackgroundFile"), "data")
 
