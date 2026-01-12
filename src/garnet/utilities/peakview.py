@@ -34,8 +34,14 @@ from matplotlib.figure import Figure
 from PIL import Image
 import numpy as np
 
-from qdarkstyle.light.palette import LightPalette
-import qdarkstyle
+try:
+    from qdarkstyle.light.palette import LightPalette
+    import qdarkstyle
+
+    style = True
+except:
+    qdarkstyle = None
+    style = False
 
 
 class View(QWidget):
@@ -368,7 +374,8 @@ if __name__ == "__main__":
     sys.excepthook = handle_exception
     app = QApplication(sys.argv)
 
-    app.setStyleSheet(qdarkstyle.load_stylesheet(palette=LightPalette))
+    if theme:
+        app.setStyleSheet(qdarkstyle.load_stylesheet(palette=LightPalette))
 
     window = IntegratedPeaksViewer()
     window.show()
