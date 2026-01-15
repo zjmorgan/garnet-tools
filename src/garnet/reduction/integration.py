@@ -148,19 +148,19 @@ class Integration(SubPlan):
         if mtd.doesExist("combine"):
             peaks.save_peaks(result_file, "combine")
 
-            # peaks.create_peaks("combine", "merge", lean=True)
+            peaks.create_peaks("combine", "merge", lean=True)
 
-            # peak_dict = self.extract_merge_peak_info("combine")
+            peak_dict = self.extract_merge_peak_info("combine")
 
-            # self.n_proc = self.plan["NProc"]
+            self.n_proc = self.plan["NProc"]
 
-            # results = self.integrate_merge(peak_dict)
+            results = self.integrate_merge(peak_dict)
 
-            # self.update_merge_info("merge", results)
+            self.update_merge_info("merge", results)
 
-            # pk_file = self.get_diagnostic_file("merge")
+            pk_file = self.get_diagnostic_file("merge")
 
-            # peaks.save_peaks(pk_file, "merge")
+            peaks.save_peaks(pk_file, "merge")
 
             opt = Optimization("combine")
             opt.optimize_lattice(self.params["Cell"])
@@ -302,37 +302,7 @@ class Integration(SubPlan):
 
             self.r_cut = r_cut
 
-            if not self.params.get("Recalibrate"):
-                est_file = self.get_plot_file("centroid#{}".format(run))
-
-                self.estimate_peak_centroid("peaks", r_cut, d_min, est_file)
-
-                ub_file = self.get_diagnostic_file("run#{}_ub".format(run))
-
-                opt = Optimization("peaks")
-                opt.optimize_lattice("Fixed")
-
-                ub_file = os.path.splitext(ub_file)[0] + ".mat"
-
-                ub = UBModel("peaks")
-                ub.save_UB(ub_file)
-
-                data.load_clear_UB(ub_file, "data", run)
-
-            peaks.predict_peaks(
-                "data",
-                "peaks",
-                centering,
-                d_min,
-                lamda_min,
-                lamda_max,
-            )
-
             self.predict_add_satellite_peaks(lamda_min, lamda_max)
-
-            est_file = self.get_plot_file("profile#{}".format(run))
-
-            params = self.estimate_peak_size("peaks", r_cut, est_file)
 
             fit = self.params["ProfileFit"]
 
@@ -348,7 +318,7 @@ class Integration(SubPlan):
                 data.convert_to_Q_sample(bank, bank, False, bank + "_det")
 
                 bank_dict = self.extract_peak_info(
-                    "peaks", params, True, fit, bank
+                    "peaks", r_cut, True, fit, bank
                 )
 
                 data.delete_workspace(bank)
@@ -843,72 +813,15 @@ class Integration(SubPlan):
 
         data_infos, peak_infos = value
 
-        Q0_min, Q1_min, Q2_min = [], [], []
-        Q0_max, Q1_max, Q2_max = [], [], []
-        Q0_bin, Q1_bin, Q2_bin = [], [], []
-        fd, fn = [], []
+        gd, gn = 0, 0
 
         for data_info in data_infos:
             Q0, Q1, Q2, d, n, dQ, Q, projections = data_info
 
-            Q0_min.append(Q0[0, 0, 0])
-            Q1_min.append(Q1[0, 0, 0])
-            Q2_min.append(Q2[0, 0, 0])
-
-            Q0_max.append(Q0[-1, 0, 0])
-            Q1_max.append(Q1[0, -1, 0])
-            Q2_max.append(Q2[0, 0, -1])
-
-            Q0_bin.append(Q0[1, 0, 0] - Q0[0, 0, 0])
-            Q1_bin.append(Q1[0, 1, 0] - Q1[0, 0, 0])
-            Q2_bin.append(Q2[0, 0, 1] - Q2[0, 0, 0])
-
-            di = scipy.interpolate.RegularGridInterpolator(
-                (Q0[:, 0, 0], Q1[0, :, 0], Q2[0, 0, :]),
-                d,
-                method="nearest",
-                fill_value=0,
-                bounds_error=False,
-            )
-
-            ni = scipy.interpolate.RegularGridInterpolator(
-                (Q0[:, 0, 0], Q1[0, :, 0], Q2[0, 0, :]),
-                n,
-                method="nearest",
-                fill_value=0,
-                bounds_error=False,
-            )
-
-            fd.append(di)
-            fn.append(ni)
-
-        Q0_min, Q0_max, Q0_bin = np.min(Q0_min), np.max(Q0_max), np.min(Q0_bin)
-        Q1_min, Q1_max, Q1_bin = np.min(Q1_min), np.max(Q1_max), np.min(Q1_bin)
-        Q2_min, Q2_max, Q2_bin = np.min(Q2_min), np.max(Q2_max), np.min(Q2_bin)
-
-        dQ = np.min([Q0_bin, Q1_bin, Q2_bin])
-
-        n0 = int(round((Q0_max - Q0_min) / Q0_bin / 2)) + 1
-        n1 = int(round((Q1_max - Q1_min) / Q1_bin / 2)) + 1
-        n2 = int(round((Q2_max - Q2_min) / Q2_bin / 2)) + 1
-
-        Q0, Q1, Q2 = np.meshgrid(
-            np.linspace(Q0_min, Q0_max, n0),
-            np.linspace(Q1_min, Q1_max, n1),
-            np.linspace(Q2_min, Q2_max, n2),
-            indexing="ij",
-        )
-
-        pts = np.column_stack([Q0.ravel(), Q1.ravel(), Q2.ravel()])
+            gd += d
+            gn += n
 
         for i, peak_info in enumerate(peak_infos):
-            if i == 0:
-                gd = fd[i](pts).reshape(Q0.shape)
-                gn = fn[i](pts).reshape(Q0.shape)
-            else:
-                gd += fd[i](pts).reshape(Q0.shape)
-                gn += fn[i](pts).reshape(Q0.shape)
-
             (
                 peak_file,
                 hkl,
