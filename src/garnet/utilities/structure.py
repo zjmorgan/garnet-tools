@@ -148,11 +148,11 @@ class StructureAnalysis:
 
         self.refine_off = defaults.get("RefineAbsorption")
 
-    def refimenent(self):
-        nuclear = NuclearStructureRefinement(
-            cell, space_group, sites, filename
-        )
-        nuclear.refine(n_iter=25)
-        nuclear.plot_result()
-        nuclear.plot_sample_shape()
-        nuclear.save_corrected_peaks()
+    # def refimenent(self):
+    #     nuclear = NuclearStructureRefinement(
+    #         cell, space_group, sites, filename
+    #     )
+    #     nuclear.refine(n_iter=25)
+    #     nuclear.plot_result()
+    #     nuclear.plot_sample_shape()
+    #     nuclear.save_corrected_peaks()
