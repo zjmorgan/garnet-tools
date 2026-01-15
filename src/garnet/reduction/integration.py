@@ -1273,6 +1273,8 @@ class Integration(SubPlan):
         return np.einsum("ij,j...->i...", W, [Q0, Q1, Q2])
 
     def bin_extent(self, UB, hkl, lamda, R, two_theta, az_phi, r_cut, dQ, fit):
+        dQ, bins = 3 * [r_cut], 3 * [21]
+
         n, u, v = self.bin_axes(R, two_theta, az_phi)
 
         projections = [n, u, v]
@@ -1286,58 +1288,11 @@ class Integration(SubPlan):
 
         Q0, Q1, Q2 = 2 * np.pi * np.dot(W.T, np.dot(UB, [h, k, l]))
 
-        if type(r_cut) is float:
-            dQ_cut = 3 * [r_cut]
-            n_bins = 21
-        else:
-            (r0, r1, r2), (dr0, dr1, dr2) = r_cut
-            dQ_cut = [
-                (r0 + dr0 * dQ) * 3,
-                (r1 + dr1 * dQ) * 3,
-                (r2 + dr2 * dQ) * 3,
-            ]
-            n_bins = 21
-
-        bin_sizes = np.array(dQ_cut) / n_bins
-
-        bin_sizes[bin_sizes < dQ] = dQ
-
-        Q0_box, Q1_box, Q2_box = [], [], []
-
-        points = [
-            [h - 0.5, k, l],
-            [h + 0.5, k, l],
-            [h, k - 0.5, l],
-            [h, k + 0.5, l],
-            [h, k, l - 0.5],
-            [h, k, l + 0.5],
-        ]
-
-        for point in points:
-            Qp_0, Qp_1, Qp_2 = 2 * np.pi * np.dot(W.T, np.dot(UB, point))
-            Q0_box.append(Qp_0 - Q0)
-            Q1_box.append(Qp_1 - Q1)
-            Q2_box.append(Qp_2 - Q2)
-
-        dQ0_cut, dQ1_cut, dQ2_cut = dQ_cut
-
-        dQ0 = np.min([np.max(np.abs(Q0_box)), dQ0_cut])
-        dQ1 = np.min([np.max(np.abs(Q1_box)), dQ1_cut])
-        dQ2 = np.min([np.max(np.abs(Q2_box)), dQ2_cut])
+        dQ0, dQ1, dQ2 = dQ
 
         extents = np.array(
             [[Q0 - dQ0, Q0 + dQ0], [Q1 - dQ1, Q1 + dQ1], [Q2 - dQ2, Q2 + dQ2]]
         )
-
-        min_adjusted = np.floor(extents[:, 0] / bin_sizes) * bin_sizes
-        max_adjusted = np.ceil(extents[:, 1] / bin_sizes) * bin_sizes
-
-        bins = ((max_adjusted - min_adjusted) / bin_sizes).astype(int)
-
-        bins[bins > n_bins] = n_bins
-        bins[bins < 10] = 10
-
-        extents = np.vstack((min_adjusted, max_adjusted)).T
 
         return bins, extents, projections, transform
 
