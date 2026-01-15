@@ -25,8 +25,8 @@ def save_YAML(output, filename):
 
     Parameters
     ----------
-    output : str
-        Name of file.
+    output : dict
+        Parameters.
     filename : str
         Output file name.
 
@@ -34,6 +34,26 @@ def save_YAML(output, filename):
 
     with open(filename, "w") as f:
         yaml.dump(output, f, Dumper=Dumper, sort_keys=False)
+
+
+def load_YAML(filename):
+    """
+    Load reduction input file.
+
+    Parameters
+    ----------
+    filename : str
+        Output file name.
+
+    Returns
+    -------
+    output : dict
+        Parameters.
+
+    """
+
+    with open(filename, "r") as f:
+        return yaml.safe_load(f)
 
 
 def save_JSON(output, filename):
@@ -372,8 +392,7 @@ class ReductionPlan:
 
         """
 
-        with open(filename, "r") as f:
-            self.plan = yaml.safe_load(f)
+        self.plan = load_YAML(filename)
 
         self.validate_plan()
 

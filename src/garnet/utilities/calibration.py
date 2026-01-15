@@ -75,7 +75,7 @@ class Calibration:
 
         self.refine_off = defaults.get("RefineGoniometer")
 
-        self.iterations = 3
+        self.iterations = 1
 
     def load_peaks(self):
         ext = os.path.splitext(self.peaks)[1]

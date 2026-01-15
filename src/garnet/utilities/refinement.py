@@ -1279,33 +1279,32 @@ class NuclearStructureRefinement:
 
 # ---
 
-# filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
+if __name__ == "__main__":
+    # filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+    filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+    filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
 
+    cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
+    space_group = "I a -3 d"
+    sites = [
+        ["Yb", 0.125, 0.0, 0.25, 1, 0.0023],
+        ["Al", 0.0, 0.0, 0.0, 1, 0.0023],
+        ["Al", 0.375, 0.0, 0.25, 1, 0.0023],
+        ["O", -0.03, 0.05, 0.149, 1, 0.0023],
+    ]
 
-cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
-space_group = "I a -3 d"
-sites = [
-    ["Yb", 0.125, 0.0, 0.25, 1, 0.0023],
-    ["Al", 0.0, 0.0, 0.0, 1, 0.0023],
-    ["Al", 0.375, 0.0, 0.25, 1, 0.0023],
-    ["O", -0.03, 0.05, 0.149, 1, 0.0023],
-]
+    # filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
 
+    # cell = [4.516, 4.516, 8.107, 90, 90, 120]
+    # space_group = "P 63/m m c"
+    # sites = [
+    #     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
+    #     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
+    #     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
+    # ]
 
-# filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
-
-# cell = [4.516, 4.516, 8.107, 90, 90, 120]
-# space_group = "P 63/m m c"
-# sites = [
-#     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
-#     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
-#     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
-# ]
-
-nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-nuclear.refine(n_iter=25)
-nuclear.plot_result()
-nuclear.plot_sample_shape()
-nuclear.save_corrected_peaks()
+    nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
+    nuclear.refine(n_iter=25)
+    nuclear.plot_result()
+    nuclear.plot_sample_shape()
+    nuclear.save_corrected_peaks()
