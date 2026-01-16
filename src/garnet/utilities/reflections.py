@@ -939,6 +939,8 @@ class Peaks:
             x.append(key)
             y.append(rate_dict[key])
 
+        rate_ave = np.mean(y)
+
         fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
         ax.set_xlabel("")
         ax.plot(x, y, ".", rasterized=True)
@@ -952,32 +954,12 @@ class Peaks:
             if rate is None:
                 scale = 0
             else:
-                scale = 1 / rate
+                scale = rate_ave / rate
             peak.setIntensity(scale * peak.getIntensity())
             peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         self.info_dict = info_dict
         self.norm_dict = norm_dict
-
-        # for peak in mtd[self.peaks]:
-        #     h, k, l = [int(val) for val in peak.getIntHKL()]
-        #     m, n, p = [int(val) for val in peak.getIntMNP()]
-
-        #     run = int(peak.getRunNumber())
-        #     key = (run, h, k, l, m, n, p)
-        #     items = self.info_dict.get(key)
-
-        #     if items is not None:
-        #         N, vol, pk_data, pk_norm, bkg_data, bkg_norm = items
-        #         intens, sig = norm_dict[key]
-
-        #         intens *= vol * N / pk_norm
-        #         sig *= vol * N / pk_norm
-
-        #         peak.setIntensity(intens)
-        #         peak.setSigmaIntensity(sig)
-
-        #         peak.setSigmaIntensity(peak.getIntensity() / intens * sig)
 
         x, y = [], []
 
