@@ -3,7 +3,11 @@ import sys
 import traceback
 
 import multiprocess as multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 
 import numpy as np
 from mantid import config
@@ -17,6 +21,16 @@ import faulthandler
 
 warnings.filterwarnings("ignore")
 faulthandler.enable()
+
+import pickle
+
+
+def _worker_call(func, kv):
+    try:
+        return func(kv)
+    except Exception:
+        traceback.print_exc()
+        raise
 
 
 class ParallelTasks:
@@ -113,29 +127,47 @@ class ParallelProcessor:
         self.n_proc = n_proc
 
     def process_dict(self, data, func):
-        self.function = func
+        use_process = False
         if self.n_proc > 1:
+            try:
+                pickle.dumps(func)
+                use_process = True
+            except Exception:
+                use_process = False
+
+        results = {}
+        if self.n_proc > 1 and use_process:
             with ProcessPoolExecutor(max_workers=self.n_proc) as executor:
                 futures = [
-                    executor.submit(self.safe_function_wrapper, kv)
+                    executor.submit(_worker_call, func, kv)
                     for kv in data.items()
                 ]
-                results = {}
                 for future in as_completed(futures):
                     try:
                         key, value = future.result()
                         results[key] = value
                     except Exception as e:
-                        print("Exception in pool: {}".format(e))
+                        print("Exception in process pool: {}".format(e))
                         traceback.print_exc()
         else:
-            results = {k: func((k, v))[1] for k, v in data.items()}
+            if self.n_proc > 1:
+                with ThreadPoolExecutor(max_workers=self.n_proc) as executor:
+                    futures = [
+                        executor.submit(func, (k, v)) for k, v in data.items()
+                    ]
+                    for future in as_completed(futures):
+                        try:
+                            key, value = future.result()
+                            results[key] = value
+                        except Exception as e:
+                            print("Exception in thread pool: {}".format(e))
+                            traceback.print_exc()
+            else:
+                for k, v in data.items():
+                    try:
+                        key, value = func((k, v))
+                        results[key] = value
+                    except Exception as e:
+                        print("Exception in serial func call: {}".format(e))
+                        traceback.print_exc()
         return results
-
-    def safe_function_wrapper(self, *args, **kwargs):
-        try:
-            return self.function(*args, **kwargs)
-        except Exception as e:
-            print("Exception in worker function: {}".format(e))
-            traceback.print_exc()
-            raise

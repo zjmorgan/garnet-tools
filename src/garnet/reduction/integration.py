@@ -28,7 +28,6 @@ os.environ["TBB_THREAD_ENABLED"] = "0"
 
 from garnet.plots.peaks import PeakPlot, PeakProfilePlot, PeakCentroidPlot
 from garnet.config.instruments import beamlines
-from garnet.reduction.crystallography import space_point
 from garnet.reduction.ub import UBModel, Optimization, Reorient, lattice_group
 from garnet.reduction.peaks import PeaksModel, PeakModel, centering_reflection
 from garnet.reduction.data import DataModel
@@ -861,7 +860,7 @@ class Integration(SubPlan):
             print(traceback.format_exc())
             return key, value
 
-        print(self.status + "{} {:}".format(self.n_proc, key))
+        print(self.status + " 2/2 {:}".format(key))
 
         if params is not None:
             c, S, *best_fit = ellipsoid.best_fit
