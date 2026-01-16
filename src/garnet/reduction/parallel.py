@@ -51,6 +51,7 @@ class ParallelTasks:
                 process_map[key] = proc_idx
 
         plan["ProcessMap"] = process_map
+        plan["NProc"] = n_proc
 
         join_args = [(plan, s, proc) for proc, s in enumerate(split)]
 
@@ -94,8 +95,6 @@ class ParallelTasks:
         os.environ.pop("NUMEXPR_NUM_THREADS", None)
         os.environ.pop("OMP_NUM_THREADS", None)
         os.environ.pop("TBB_THREAD_ENABLED", None)
-
-        plan["NProc"] = n_proc
 
         if self.combine is not None:
             self.combine(plan, self.results)

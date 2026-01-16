@@ -55,12 +55,6 @@ class Integration(SubPlan):
         self.validate_params()
 
     def validate_params(self):
-        symmetry = self.params.get("Symmetry")
-        if symmetry is not None:
-            symmetry = symmetry.replace(" ", "")
-            self.check(symmetry, "in", space_point.keys(), "Invalid symmetry")
-            self.params["Symmetry"] = symmetry
-
         self.check(
             self.params["Cell"], "in", lattice_group.keys(), "Invalid Cell"
         )
@@ -808,18 +802,37 @@ class Integration(SubPlan):
 
         return key, value
 
+    def pad_to_shape(self, x, shape, fill=0):
+        out = np.full(shape, fill, dtype=np.result_type(x, fill))
+        sx, sy, sz = x.shape
+        out[:sx, :sy, :sz] = x
+        return out
+
+    def add_with_padding(self, a, b, fill=0):
+        a = np.asarray(a)
+        b = np.asarray(b)
+        if a.ndim != 3 or b.ndim != 3:
+            raise ValueError("Both arrays must be 3D")
+
+        shape = tuple(max(sa, sb) for sa, sb in zip(a.shape, b.shape))
+        a2 = self.pad_to_shape(a, shape, fill=fill)
+        b2 = self.pad_to_shape(b, shape, fill=fill)
+        return a2 + b2
+
     def merge_peaks(self, key_value):
         key, value = key_value
 
         data_infos, peak_infos = value
 
-        gd, gn = 0, 0
-
-        for data_info in data_infos:
+        for i, data_info in enumerate(data_infos):
             Q0, Q1, Q2, d, n, dQ, Q, projections = data_info
 
-            gd += d
-            gn += n
+            if i == 0:
+                gd = d.copy()
+                gn = n.copy()
+            else:
+                gd = self.add_with_padding(gd, d)
+                gn = self.add_with_padding(gn, n)
 
         for i, peak_info in enumerate(peak_infos):
             (
@@ -848,7 +861,7 @@ class Integration(SubPlan):
             print(traceback.format_exc())
             return key, value
 
-        print(self.status + " 2/2 {:}".format(key))
+        print(self.status + "{} {:}".format(self.n_proc, key))
 
         if params is not None:
             c, S, *best_fit = ellipsoid.best_fit
