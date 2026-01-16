@@ -41,15 +41,12 @@ np.random.seed(13)
 import scipy.optimize
 import scipy.interpolate
 
-from scipy.spatial.transform import Rotation
-
 from sklearn.cluster import AgglomerativeClustering
 
 from mantid.geometry import (
     CrystalStructure,
     ReflectionGenerator,
     ReflectionConditionFilter,
-    PointGroupFactory,
 )
 
 from mantid.kernel import V3D
@@ -58,10 +55,7 @@ from mantid import config
 
 config["Q.convention"] = "Crystallography"
 
-from matplotlib import colormaps
 
-from matplotlib.colors import Normalize
-from matplotlib.ticker import FormatStrFormatter
 from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 

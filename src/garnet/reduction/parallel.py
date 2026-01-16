@@ -137,6 +137,7 @@ class ParallelProcessor:
 
         results = {}
         if self.n_proc > 1 and use_process:
+            print("Process")
             with ProcessPoolExecutor(max_workers=self.n_proc) as executor:
                 futures = [
                     executor.submit(_worker_call, func, kv)
@@ -151,6 +152,7 @@ class ParallelProcessor:
                         traceback.print_exc()
         else:
             if self.n_proc > 1:
+                print("Thread")
                 with ThreadPoolExecutor(max_workers=self.n_proc) as executor:
                     futures = [
                         executor.submit(func, (k, v)) for k, v in data.items()
@@ -163,6 +165,7 @@ class ParallelProcessor:
                             print("Exception in thread pool: {}".format(e))
                             traceback.print_exc()
             else:
+                print("Serial")
                 for k, v in data.items():
                     try:
                         key, value = func((k, v))
