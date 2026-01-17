@@ -36,18 +36,17 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 
+from matplotlib.patches import Ellipse
+from matplotlib.transforms import Affine2D
+
 np.random.seed(13)
 
 import scipy.optimize
 import scipy.interpolate
+import scipy.stats
 
 from sklearn.cluster import AgglomerativeClustering
-
-from mantid.geometry import (
-    CrystalStructure,
-    ReflectionGenerator,
-    ReflectionConditionFilter,
-)
+from sklearn.covariance import MinCovDet
 
 from mantid.kernel import V3D
 
@@ -580,10 +579,6 @@ class Peaks:
         for i, peak in zip(indices.tolist(), mtd[self.peaks]):
             peak.setIntensity(scale * peak.getIntensity())
             peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
-            if peak.getIntensity() > 10 * maximal:
-                peak.setSigmaIntensity(float("-inf"))
-            if peak.getSigmaIntensity() > 10 * maximal:
-                peak.setSigmaIntensity(float("-inf"))
             peak.setPeakNumber(peak.getRunNumber())
             peak.setBinCount(peak.getRunNumber())
             # peak.setRunNumber(1)
@@ -609,34 +604,205 @@ class Peaks:
             if not (cols[0] < col < cols[1]) or not (rows[0] < row < rows[1]):
                 peak.setSigmaIntensity(peak.getIntensity())
 
+    # def remove_off_centered(self):
+    #     aluminum = CrystalStructure(
+    #         "4.05 4.05 4.05", "F m -3 m", "Al 0 0 0 1.0 0.005"
+    #     )
+
+    #     copper = CrystalStructure(
+    #         "3.61 3.61 3.61", "F m -3 m", "Cu 0 0 0 1.0 0.005"
+    #     )
+
+    #     generator_al = ReflectionGenerator(aluminum)
+    #     generator_cu = ReflectionGenerator(copper)
+
+    #     d = np.array(mtd[self.peaks].column("DSpacing"))
+
+    #     d_min = np.nanmin(d)
+    #     d_max = np.nanmax(d)
+
+    #     hkls_al = generator_al.getUniqueHKLsUsingFilter(
+    #         d_min, d_max, ReflectionConditionFilter.StructureFactor
+    #     )
+
+    #     hkls_cu = generator_cu.getUniqueHKLsUsingFilter(
+    #         d_min, d_max, ReflectionConditionFilter.StructureFactor
+    #     )
+
+    #     d_al = np.unique(generator_al.getDValues(hkls_al))
+    #     d_cu = np.unique(generator_cu.getDValues(hkls_cu))
+
+    #     ol = mtd[self.peaks].sample().getOrientedLattice()
+
+    #     Q_vol = []
+    #     powder_err = []
+    #     peak_err = []
+    #     Q0_mod = []
+    #     Q_rad = []
+
+    #     for peak in mtd[self.peaks]:
+    #         h, k, l = peak.getHKL()
+    #         d0 = ol.d(h, k, l)
+    #         powder_err.append(peak.getDSpacing() / d0 - 1)
+    #         Q0_mod.append(2 * np.pi / d0)
+
+    #         shape = peak.getPeakShape()
+    #         if shape.shapeName() == "ellipsoid":
+    #             ellipsoid = eval(shape.toJSON())
+
+    #             v0 = [float(val) for val in ellipsoid["direction0"].split(" ")]
+    #             v1 = [float(val) for val in ellipsoid["direction1"].split(" ")]
+    #             v2 = [float(val) for val in ellipsoid["direction2"].split(" ")]
+
+    #             r0 = ellipsoid["radius0"]
+    #             r1 = ellipsoid["radius1"]
+    #             r2 = ellipsoid["radius2"]
+
+    #         else:
+    #             r0 = r1 = r2 = 1e-6
+    #             v0, v1, v2 = np.eye(3).tolist()
+
+    #         r = np.array([r0, r1, r2])
+
+    #         U = np.column_stack([v0, v1, v2])
+    #         V = np.diag(r**2)
+    #         S = np.dot(np.dot(U, V), U.T)
+
+    #         vol = 4 / 3 * np.pi * r0 * r1 * r2
+
+    #         Q_vol.append(vol)
+
+    #         R = peak.getGoniometerMatrix()
+
+    #         two_theta = peak.getScattering()
+    #         az_phi = peak.getAzimuthal()
+
+    #         kf_hat = np.array(
+    #             [
+    #                 np.sin(two_theta) * np.cos(az_phi),
+    #                 np.sin(two_theta) * np.sin(az_phi),
+    #                 np.cos(two_theta),
+    #             ]
+    #         )
+
+    #         ki_hat = np.array([0, 0, 1])
+
+    #         n = kf_hat - ki_hat
+    #         n /= np.linalg.norm(n)
+
+    #         u = np.cross(ki_hat, kf_hat)
+    #         u /= np.linalg.norm(u)
+
+    #         v = np.cross(n, u)
+    #         v /= np.linalg.norm(v)
+
+    #         n, u, v = R.T @ n, R.T @ u, R.T @ v
+
+    #         Q0 = 2 * np.pi * ol.getUB() @ np.array([h, k, l])
+    #         Q = peak.getQSampleFrame()
+
+    #         W = np.column_stack([n, u, v])
+
+    #         peak_err.append(W @ (Q - Q0))
+
+    #         r0 = np.sqrt(n.T @ (S @ n))
+    #         r1 = np.sqrt(u.T @ (S @ u))
+    #         r2 = np.sqrt(v.T @ (S @ v))
+
+    #         Q_rad.append([r0, r1, r2])
+
+    #     Q0_mod = np.array(Q0_mod)
+    #     powder_err = np.array(powder_err)
+    #     peak_err = np.array(peak_err) / Q0_mod[:, np.newaxis]
+    #     Q_vol = np.array(Q_vol)
+    #     Q_rad = np.array(Q_rad)
+
+    #     powder_med = np.nanmedian(powder_err)
+    #     peak_med = np.nanmedian(peak_err, axis=0)
+
+    #     powder_mad = np.nanmedian(np.abs(powder_err - powder_med))
+    #     peak_mad = np.nanmedian(np.abs(peak_err - peak_med), axis=0)
+
+    #     powder_min = powder_med - 1.5 * powder_mad
+    #     powder_max = powder_med + 1.5 * powder_mad
+
+    #     peak_min = peak_med - 1.5 * peak_mad
+    #     peak_max = peak_med + 1.5 * peak_mad
+
+    #     vol_med = np.nanmedian(Q_vol)
+    #     vol_mad = np.nanmedian(np.abs(Q_vol - vol_med))
+
+    #     vol_cut = vol_med + 1.5 * vol_mad
+
+    #     radius_med = np.nanmedian(Q_rad, axis=0)
+
+    #     radius_mad = np.nanmedian(np.abs(Q_rad - radius_med), axis=0)
+
+    #     radius_max = radius_med + 1.5 * radius_mad
+
+    #     filename = os.path.splitext(self.filename)[0]
+
+    #     fig, ax = plt.subplots(4, 2, layout="constrained", sharex=True)
+    #     ax = ax.T.ravel()
+    #     ax[3].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+    #     ax[7].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+    #     ax[0].set_ylabel("$d/d_0-1$")
+    #     ax[1].set_ylabel("$\Delta{Q_1}/|Q|$")
+    #     ax[2].set_ylabel("$\Delta{Q_2}/|Q|$")
+    #     ax[3].set_ylabel("$\Delta{Q_3}/|Q|$")
+    #     ax[4].set_ylabel("$V$ [$\AA^{-3}$]")
+    #     ax[5].set_ylabel("$r_1$  [$\AA^{-1}$]")
+    #     ax[6].set_ylabel("$r_2$  [$\AA^{-1}$]")
+    #     ax[7].set_ylabel("$r_3$  [$\AA^{-1}$]")
+    #     ax[0].plot(Q0_mod, powder_err, ".", color="C0", rasterized=True)
+    #     ax[1].plot(Q0_mod, peak_err[:, 0], ".", color="C1", rasterized=True)
+    #     ax[2].plot(Q0_mod, peak_err[:, 1], ".", color="C2", rasterized=True)
+    #     ax[3].plot(Q0_mod, peak_err[:, 2], ".", color="C3", rasterized=True)
+    #     ax[4].plot(Q0_mod, Q_vol, ".", color="C4", rasterized=True)
+    #     ax[5].plot(Q0_mod, Q_rad[:, 0], ".", color="C5", rasterized=True)
+    #     ax[6].plot(Q0_mod, Q_rad[:, 1], ".", color="C6", rasterized=True)
+    #     ax[7].plot(Q0_mod, Q_rad[:, 2], ".", color="C7", rasterized=True)
+    #     ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
+    #     ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
+    #     ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
+    #     ax[1].axhline(peak_max[0], color="k", linestyle="--", linewidth=1)
+    #     ax[2].axhline(peak_min[1], color="k", linestyle="--", linewidth=1)
+    #     ax[2].axhline(peak_max[1], color="k", linestyle="--", linewidth=1)
+    #     ax[3].axhline(peak_min[2], color="k", linestyle="--", linewidth=1)
+    #     ax[3].axhline(peak_max[2], color="k", linestyle="--", linewidth=1)
+    #     ax[4].axhline(vol_cut, color="k", linestyle="--", linewidth=1)
+    #     ax[5].axhline(radius_max[0], color="k", linestyle="--", linewidth=1)
+    #     ax[6].axhline(radius_max[1], color="k", linestyle="--", linewidth=1)
+    #     ax[7].axhline(radius_max[2], color="k", linestyle="--", linewidth=1)
+
+    #     for i in range(8):
+    #         ax[0].minorticks_on()
+    #         for d in d_al:
+    #             ax[i].axvline(
+    #                 2 * np.pi / d, color="k", linestyle=":", linewidth=1
+    #             )
+
+    #         for d in d_cu:
+    #             ax[i].axvline(
+    #                 2 * np.pi / d, color="k", linestyle=":", linewidth=1
+    #             )
+
+    #     fig.savefig(filename + "_cont.pdf")
+
+    #     for i, peak in enumerate(mtd[self.peaks]):
+    #         powder = powder_err[i] > powder_max or powder_err[i] < powder_min
+    #         contamination = (peak_err[i] > peak_max) | (peak_err[i] < peak_min)
+    #         background = Q_vol[i] > vol_cut
+    #         if contamination.any() or powder.any() or background:
+    #             peak.setSigmaIntensity(float("-inf"))
+
+    def median_absolute_devation(self, arr):
+        med = np.nanmedian(arr, axis=0)
+        mad = np.nanmedian(np.abs(arr - med), axis=0)
+
+        return med, mad
+
     def remove_off_centered(self):
-        aluminum = CrystalStructure(
-            "4.05 4.05 4.05", "F m -3 m", "Al 0 0 0 1.0 0.005"
-        )
-
-        copper = CrystalStructure(
-            "3.61 3.61 3.61", "F m -3 m", "Cu 0 0 0 1.0 0.005"
-        )
-
-        generator_al = ReflectionGenerator(aluminum)
-        generator_cu = ReflectionGenerator(copper)
-
-        d = np.array(mtd[self.peaks].column("DSpacing"))
-
-        d_min = np.nanmin(d)
-        d_max = np.nanmax(d)
-
-        hkls_al = generator_al.getUniqueHKLsUsingFilter(
-            d_min, d_max, ReflectionConditionFilter.StructureFactor
-        )
-
-        hkls_cu = generator_cu.getUniqueHKLsUsingFilter(
-            d_min, d_max, ReflectionConditionFilter.StructureFactor
-        )
-
-        d_al = np.unique(generator_al.getDValues(hkls_al))
-        d_cu = np.unique(generator_cu.getDValues(hkls_cu))
-
         ol = mtd[self.peaks].sample().getOrientedLattice()
 
         Q_vol = []
@@ -644,6 +810,8 @@ class Peaks:
         peak_err = []
         Q0_mod = []
         Q_rad = []
+
+        wl, tt = [], []
 
         for peak in mtd[self.peaks]:
             h, k, l = peak.getHKL()
@@ -679,8 +847,12 @@ class Peaks:
 
             R = peak.getGoniometerMatrix()
 
+            lamda = peak.getWavelength()
             two_theta = peak.getScattering()
             az_phi = peak.getAzimuthal()
+
+            wl.append(lamda)
+            tt.append(two_theta)
 
             kf_hat = np.array(
                 [
@@ -701,10 +873,8 @@ class Peaks:
             v = np.cross(n, u)
             v /= np.linalg.norm(v)
 
-            n, u, v = R.T @ n, R.T @ u, R.T @ v
-
-            Q0 = 2 * np.pi * ol.getUB() @ np.array([h, k, l])
-            Q = peak.getQSampleFrame()
+            Q0 = 2 * np.pi * R @ ol.getUB() @ np.array([h, k, l])
+            Q = peak.getQLabFrame()
 
             W = np.column_stack([n, u, v])
 
@@ -718,88 +888,107 @@ class Peaks:
 
         Q0_mod = np.array(Q0_mod)
         powder_err = np.array(powder_err)
-        peak_err = np.array(peak_err) / Q0_mod[:, np.newaxis]
+        peak_err = np.array(peak_err)  # / Q0_mod[:, np.newaxis] * 100
         Q_vol = np.array(Q_vol)
         Q_rad = np.array(Q_rad)
 
-        powder_med = np.nanmedian(powder_err)
-        peak_med = np.nanmedian(peak_err, axis=0)
-
-        powder_mad = np.nanmedian(np.abs(powder_err - powder_med))
-        peak_mad = np.nanmedian(np.abs(peak_err - peak_med), axis=0)
-
-        powder_min = powder_med - 1.5 * powder_mad
-        powder_max = powder_med + 1.5 * powder_mad
-
-        peak_min = peak_med - 1.5 * peak_mad
-        peak_max = peak_med + 1.5 * peak_mad
-
-        vol_med = np.nanmedian(Q_vol)
-        vol_mad = np.nanmedian(np.abs(Q_vol - vol_med))
-
-        vol_cut = vol_med + 1.5 * vol_mad
-
-        radius_med = np.nanmedian(Q_rad, axis=0)
-
-        radius_mad = np.nanmedian(np.abs(Q_rad - radius_med), axis=0)
-
-        radius_max = radius_med + 1.5 * radius_mad
+        wl = np.array(wl)
+        tt = np.array(tt)
 
         filename = os.path.splitext(self.filename)[0]
 
-        fig, ax = plt.subplots(4, 2, layout="constrained", sharex=True)
-        ax = ax.T.ravel()
-        ax[3].set_xlabel("$|Q|$ [$\AA^{-1}$]")
-        ax[7].set_xlabel("$|Q|$ [$\AA^{-1}$]")
-        ax[0].set_ylabel("$d/d_0-1$")
-        ax[1].set_ylabel("$\Delta{Q_1}/|Q|$")
-        ax[2].set_ylabel("$\Delta{Q_2}/|Q|$")
-        ax[3].set_ylabel("$\Delta{Q_3}/|Q|$")
-        ax[4].set_ylabel("$V$ [$\AA^{-3}$]")
-        ax[5].set_ylabel("$r_1$  [$\AA^{-1}$]")
-        ax[6].set_ylabel("$r_2$  [$\AA^{-1}$]")
-        ax[7].set_ylabel("$r_3$  [$\AA^{-1}$]")
-        ax[0].plot(Q0_mod, powder_err, ",", color="C0", rasterized=True)
-        ax[1].plot(Q0_mod, peak_err[:, 0], ",", color="C1", rasterized=True)
-        ax[2].plot(Q0_mod, peak_err[:, 1], ",", color="C2", rasterized=True)
-        ax[3].plot(Q0_mod, peak_err[:, 2], ",", color="C3", rasterized=True)
-        ax[4].plot(Q0_mod, Q_vol, ",", color="C4", rasterized=True)
-        ax[5].plot(Q0_mod, Q_rad[:, 0], ",", color="C5", rasterized=True)
-        ax[6].plot(Q0_mod, Q_rad[:, 1], ",", color="C6", rasterized=True)
-        ax[7].plot(Q0_mod, Q_rad[:, 2], ",", color="C7", rasterized=True)
-        ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
-        ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
-        ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
-        ax[1].axhline(peak_max[0], color="k", linestyle="--", linewidth=1)
-        ax[2].axhline(peak_min[1], color="k", linestyle="--", linewidth=1)
-        ax[2].axhline(peak_max[1], color="k", linestyle="--", linewidth=1)
-        ax[3].axhline(peak_min[2], color="k", linestyle="--", linewidth=1)
-        ax[3].axhline(peak_max[2], color="k", linestyle="--", linewidth=1)
-        ax[4].axhline(vol_cut, color="k", linestyle="--", linewidth=1)
-        ax[5].axhline(radius_max[0], color="k", linestyle="--", linewidth=1)
-        ax[6].axhline(radius_max[1], color="k", linestyle="--", linewidth=1)
-        ax[7].axhline(radius_max[2], color="k", linestyle="--", linewidth=1)
+        with PdfPages(filename + "_cont.pdf") as pdf:
+            fig, ax = plt.subplots(3, 1, sharex=True, sharey=True)
 
-        for i in range(8):
+            ax[0].scatter(Q0_mod, peak_err[:, 0], c=wl, s=1)
+            ax[1].scatter(Q0_mod, peak_err[:, 1], c=wl, s=1)
+            ax[2].scatter(Q0_mod, peak_err[:, 2], c=wl, s=1)
             ax[0].minorticks_on()
-            for d in d_al:
-                ax[i].axvline(
-                    2 * np.pi / d, color="k", linestyle=":", linewidth=1
+            ax[2].set_xlabel(r"$Q$ [$\AA^{-1}$]")
+            ax[0].set_ylabel(r"$\Delta{Q}_1$ [$\AA^{-1}$]")
+            ax[1].set_ylabel(r"$\Delta{Q}_2$ [$\AA^{-1}$]")
+            ax[2].set_ylabel(r"$\Delta{Q}_3$ [$\AA^{-1}$]")
+
+            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            plt.close(fig)
+            plt.close("all")
+
+            fig, ax = plt.subplots(3, 1, sharex=True, sharey=True)
+
+            ax[0].scatter(Q0_mod, Q_rad[:, 0], c="C0", s=1)
+            ax[1].scatter(Q0_mod, Q_rad[:, 1], c="C1", s=1)
+            ax[2].scatter(Q0_mod, Q_rad[:, 2], c="C2", s=1)
+
+            ax[0].minorticks_on()
+            ax[2].set_xlabel(r"$Q$ [$\AA^{-1}$]")
+            ax[0].set_ylabel(r"$r_1$ [$\AA^{-1}$]")
+            ax[1].set_ylabel(r"$r_2$ [$\AA^{-1}$]")
+            ax[2].set_ylabel(r"$r_3$ [$\AA^{-1}$]")
+
+            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            plt.close(fig)
+            plt.close("all")
+
+            fig, ax = plt.subplots(1, 3, sharex=True, sharey=True)
+
+            sort = np.argsort(Q0_mod)
+
+            for i in range(3):
+                ax[i].scatter(
+                    Q_rad[sort, i], peak_err[sort, i], c=Q0_mod[sort], s=0.1
+                )
+                ax[i].set_aspect(1)
+                ax[i].minorticks_on()
+                ax[i].set_xlabel(r"$r_{}$".format(i + 1) + " [$\AA^{-1}$]")
+
+            ax[0].set_ylabel(r"$\Delta{Q}_i$ [$\AA^{-1}$]")
+
+            for i in range(3):
+                X = np.column_stack([Q_rad[sort, i], peak_err[sort, i]])
+                mcd = MinCovDet().fit(X)
+
+                cov = mcd.covariance_
+                pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
+
+                eps = 1e-6
+                if abs(pearson) > 1 - eps:
+                    pearson = np.clip(pearson, -1, 1)
+                    angle = 0.5 * np.pi if pearson > 0 else -0.5 * np.pi
+                else:
+                    angle = np.arctan(
+                        2.0 * pearson * cov[0, 1] / (cov[0, 0] - cov[1, 1])
+                    )
+
+                n_std = np.sqrt(scipy.stats.chi2.ppf(0.999, df=2))
+                scale_x = np.sqrt(cov[0, 0]) * n_std
+                scale_y = np.sqrt(cov[1, 1]) * n_std
+
+                mean_x, mean_y = mcd.location_
+
+                trans = (
+                    Affine2D()
+                    .rotate_deg(angle * 180 / np.pi)
+                    .scale(scale_x, scale_y)
+                    .translate(mean_x, mean_y)
                 )
 
-            for d in d_cu:
-                ax[i].axvline(
-                    2 * np.pi / d, color="k", linestyle=":", linewidth=1
+                ellipse = Ellipse(
+                    (0, 0), width=1, height=1, facecolor="none", edgecolor="k"
                 )
+                ellipse.set_transform(trans + ax[i].transData)
+                ax[i].add_patch(ellipse)
 
-        fig.savefig(filename + "_cont.pdf")
+                inv_cov = np.linalg.inv(cov)
+                for j, peak in enumerate(mtd[self.peaks]):
+                    x = Q_rad[j, i]
+                    y = peak_err[j, i]
+                    dx = [x - mean_x, y - mean_y]
+                    if inv_cov @ dx @ dx > n_std**2:
+                        peak.setSigmaIntensity(float("-inf"))
 
-        for i, peak in enumerate(mtd[self.peaks]):
-            powder = powder_err[i] > powder_max or powder_err[i] < powder_min
-            contamination = (peak_err[i] > peak_max) | (peak_err[i] < peak_min)
-            background = Q_vol[i] > vol_cut
-            if contamination.any() or powder.any() or background:
-                peak.setSigmaIntensity(float("-inf"))
+            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            plt.close(fig)
+            plt.close("all")
 
     def remove_non_integrated(self):
         for peak in mtd[self.peaks]:
@@ -979,38 +1168,6 @@ class Peaks:
                 y.append(norm)
 
         filename = os.path.splitext(self.filename)[0]
-
-        x, y = np.array(x), np.array(y)
-
-        ratio_Q1, ratio_Q3 = np.nanpercentile(y, [25, 75])
-
-        ratio_IQR = ratio_Q3 - ratio_Q1
-
-        ratio_min = ratio_Q1 - 1.5 * ratio_IQR
-        ratio_max = ratio_Q3 + 1.5 * ratio_IQR
-
-        fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
-        ax.set_xlabel("$|Q|$ [$\AA^{-1}$]")
-        ax.plot(x, y, ".", rasterized=True)
-        ax.minorticks_on()
-        ax.set_ylabel("Log peak-background norm")
-        ax.axhline(ratio_max, color="k", linestyle="--", linewidth=1)
-        ax.axhline(ratio_min, color="k", linestyle="--", linewidth=1)
-        fig.savefig(filename + "_norm.pdf")
-
-        for peak in mtd[self.peaks]:
-            h, k, l = [int(val) for val in peak.getIntHKL()]
-            m, n, p = [int(val) for val in peak.getIntMNP()]
-
-            run = int(peak.getRunNumber())
-            key = (run, h, k, l, m, n, p)
-            items = self.info_dict.get(key)
-
-            if items is not None:
-                norm = np.log10(bkg_norm / pk_norm)
-
-                if norm < ratio_min or norm > ratio_max:
-                    peak.setSigmaIntensity(float("-inf"))
 
         lamda = np.array(mtd[self.peaks].column("Wavelength"))
 
