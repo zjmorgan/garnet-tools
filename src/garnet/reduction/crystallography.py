@@ -67,3 +67,6 @@ for key in keys:
 
 for key in mantid_misses:
     print(key)
+
+space_groups = {sg.replace(" ", ""): sg for sg in space_groups}
+point_groups = {pg.replace(" ", ""): pg for pg in point_groups}

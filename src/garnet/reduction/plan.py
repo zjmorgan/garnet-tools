@@ -1,5 +1,4 @@
 import os
-import sys
 import yaml
 import json
 import shutil
@@ -9,10 +8,13 @@ import concurrent.futures
 from garnet.config.instruments import beamlines
 
 
-class Dumper(yaml.Dumper):
+class Dumper(yaml.SafeDumper):
     def represent_list(self, data):
+        flow = len(data) <= 6 and all(
+            not isinstance(x, (list, dict)) for x in data
+        )
         return self.represent_sequence(
-            "tag:yaml.org,2002:seq", data, flow_style=True
+            "tag:yaml.org,2002:seq", data, flow_style=flow
         )
 
 
@@ -33,7 +35,7 @@ def save_YAML(output, filename):
     """
 
     with open(filename, "w") as f:
-        yaml.dump(output, f, Dumper=Dumper, sort_keys=False)
+        yaml.dump(output, f, Dumper=Dumper, sort_keys=False, width=79)
 
 
 def load_YAML(filename):

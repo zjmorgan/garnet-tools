@@ -22,6 +22,7 @@ from mantid.simpleapi import (
     CopySample,
     SetGoniometer,
     SetSample,
+    LoadSampleShape,
     AddAbsorptionWeightedPathLengths,
     RemoveMaskedSpectra,
     GroupDetectors,
@@ -35,6 +36,7 @@ import re
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pyvista as pv
 
 from matplotlib.patches import Ellipse
 from matplotlib.transforms import Affine2D
@@ -125,8 +127,7 @@ class AbsorptionCorrection:
         z_parameter,
         u_vector=[0, 0, 1],
         v_vector=[1, 0, 0],
-        params=[0.1, 0.2, 0.4],
-        shape="plate",
+        params=None,
         filename=None,
     ):
         assert "PeaksWorkspace" in str(type(mtd[peaks]))
@@ -154,14 +155,9 @@ class AbsorptionCorrection:
         self.u_vector = u_vector
         self.v_vector = v_vector
 
-        if shape == "plate":
-            assert len(params) == 3
-        elif shape == "cylinder":
-            assert len(params) == 2
-        # else:
-        #     assert len(params) == 1
+        if params is not None:
+            assert len(v_vector) == 3
 
-        self.shape = shape
         self.params = params
 
         if filename is not None:
@@ -186,6 +182,13 @@ class AbsorptionCorrection:
 
         return all(re.fullmatch(pattern, part) for part in parts)
 
+    def save_ellipsoid_stl(self, params, filename="/tmp/ellipsoid.stl"):
+        l_thickness, l_width, l_height = params
+        sph = pv.Icosphere(radius=0.5)
+
+        ell = sph.scale([l_width, l_height, l_thickness], inplace=False)
+        ell.save(filename)
+
     def set_shape(self):
         self.UB = mtd[self.peaks].sample().getOrientedLattice().getUB().copy()
 
@@ -204,54 +207,11 @@ class AbsorptionCorrection:
         gon = mtd[self.peaks].run().getGoniometer()
 
         gon.setR(T)
-        gamma, beta, alpha = gon.getEulerAngles("ZYX")
+        self.gamma, self.beta, self.alpha = gon.getEulerAngles("ZYX")
 
-        if self.shape == "sphere":
-            shape = ' \
-            <sphere id="sphere"> \
-            <radius val="{}" /> \
-            <centre x="0.0" y="0.0" z="0.0" /> \
-            <rotate x="{}" y="{}" z="{}" /> \
-            </sphere> \
-            '.format(
-                self.params[0] / 2000, alpha, beta, gamma
-            )
-        elif self.shape == "cylinder":
-            shape = ' \
-            <cylinder id="cylinder"> \
-            <centre-of-bottom-base r="0.0" t="0.0" p="0.0" />   \
-            <axis x="0.0" y="1.0" z="0" /> \
-            <radius val="{}" />  \
-            <height val="{}" />  \
-            <rotate x="{}" y="{}" z="{}" /> \
-            </cylinder> \
-          '.format(
-                self.params[0] / 2000,
-                self.params[1] / 1000,
-                alpha,
-                beta,
-                gamma,
-            )
-        else:
-            shape = ' \
-            <cuboid id="cuboid"> \
-            <width val="{}" /> \
-            <height val="{}"  /> \
-            <depth val="{}" /> \
-            <centre x="0.0" y="0.0" z="0.0"  /> \
-            <rotate x="{}" y="{}" z="{}" /> \
-            </cuboid> \
-            <algebra val="cuboid" /> \
-          '.format(
-                self.params[0] / 1000,
-                self.params[1] / 1000,
-                self.params[2] / 1000,
-                alpha,
-                beta,
-                gamma,
-            )
-
-        self.shape_dict = {"Shape": "CSG", "Value": shape}
+        if self.params is not None:
+            self.shapestl = os.path.splitext(self.filename)[0] + ".stl"
+            self.save_ellipsoid_stl(self.params, self.shapestl)
 
     def set_material(self):
         self.mat_dict = {
@@ -311,14 +271,23 @@ class AbsorptionCorrection:
 
                 R = mtd["_tmp"].getPeak(0).getGoniometerMatrix()
 
-                mtd["_tmp"].run().getGoniometer().setR(R)
-                omega, chi, phi = (
-                    mtd["_tmp"].run().getGoniometer().getEulerAngles("YZY")
+                gon = mtd["_tmp"].run().getGoniometer()
+
+                gon.setR(R)
+                omega, chi, phi = gon.getEulerAngles("YZY")
+
+                LoadSampleShape(
+                    InputWorkspace="_tmp",
+                    Filename=self.shapestl,
+                    Scale="mm",
+                    XDegrees=self.alpha,
+                    YDegrees=self.beta,
+                    ZDegrees=self.gamma,
+                    OutputWorkspace="_tmp",
                 )
 
                 SetSample(
                     InputWorkspace="_tmp",
-                    Geometry=self.shape_dict,
                     Material=self.mat_dict,
                 )
 
@@ -342,7 +311,7 @@ class AbsorptionCorrection:
                     edgecolors="k",
                     facecolors="w",
                     alpha=0.5,
-                    linewidths=1,
+                    linewidths=0.1,
                 )
 
                 fig, ax = plt.subplots(
@@ -364,20 +333,21 @@ class AbsorptionCorrection:
                     ax.get_ylim3d()[1],
                     ax.get_zlim3d()[1],
                 )
-                origin = (0, 0, 0)
+
                 lims = ax.get_xlim3d()
-                factor = (lims[1] - lims[0]) / 3
+                factor = (lims[1] - lims[0]) / 4
+                origin = (lims[1] - lims[0]) / 4
 
                 for j in range(3):
                     vector = reciprocal_lattice[:, j]
-                    vector_norm = vector / np.linalg.norm(vector)
+                    vector = vector / np.linalg.norm(vector)
                     ax.quiver(
-                        origin[0],
-                        origin[1],
-                        origin[2],
-                        vector_norm[0],
-                        vector_norm[1],
-                        vector_norm[2],
+                        origin,
+                        origin,
+                        origin,
+                        vector[0],
+                        vector[1],
+                        vector[2],
                         length=factor,
                         color=colors[j],
                         linestyle="-",
@@ -399,9 +369,7 @@ class AbsorptionCorrection:
         n = mat.numberDensityEffective  # A^-3
         N = mat.totalAtoms
 
-        vol = mtd["_tmp"].sample().getShape().volume()
-
-        V = np.abs(vol * 100**3)  # cm^3
+        V = np.abs(np.prod(self.params) * 10**3)  # cm^3
 
         rho = (n / N) / 0.6022 * M
         m = rho * V * 1000  # mg
@@ -452,18 +420,27 @@ class AbsorptionCorrection:
                 OutputWorkspace="_tmp",
             )
 
+            LoadSampleShape(
+                InputWorkspace="_tmp",
+                Filename=self.shapestl,
+                Scale="mm",
+                XDegrees=self.alpha,
+                YDegrees=self.beta,
+                ZDegrees=self.gamma,
+                OutputWorkspace="_tmp",
+            )
+
             SetSample(
                 InputWorkspace="_tmp",
-                Geometry=self.shape_dict,
                 Material=self.mat_dict,
             )
 
             R = mtd["_tmp"].getPeak(0).getGoniometerMatrix()
 
-            mtd["_tmp"].run().getGoniometer().setR(R)
-            omega, chi, phi = (
-                mtd["_tmp"].run().getGoniometer().getEulerAngles("YZY")
-            )
+            gon = mtd["_tmp"].run().getGoniometer()
+
+            gon.setR(R)
+            omega, chi, phi = gon.getEulerAngles("YZY")
 
             SetGoniometer(
                 Workspace="_tmp",
@@ -491,7 +468,7 @@ class AbsorptionCorrection:
 
         mat = mtd["_tmp"].sample().getMaterial()
 
-        for peak in mtd[peaks]:
+        for peak in mtd[self.peaks]:
             lamda = peak.getWavelength()
             Tbar = peak.getAbsorptionWeightedPathLength()
 
@@ -499,12 +476,10 @@ class AbsorptionCorrection:
                 mat.totalScatterXSection() + mat.absorbXSection(lamda)
             )
 
-            print("mu = {:4.2f} Tbar = {:4.2f}".format(mu, Tbar))
-
             corr = np.exp(mu * Tbar)
 
-            # peak.setIntensity(peak.getIntensity() * corr)
-            # peak.setSigmaIntensity(peak.getSigmaIntensity() * corr)
+            print("mu = {:4.2f} Tbar = {:4.2f}".format(mu, Tbar))
+
             peak.setBinCount(corr)
 
 
@@ -1800,20 +1775,12 @@ def main():
     )
 
     parser.add_argument(
-        "-s",
-        "--shape",
-        type=str,
-        default="sphere",
-        help="Sample shape sphere, cylinder, plate",
-    )
-
-    parser.add_argument(
         "-p",
         "--parameters",
         nargs="+",
         type=float,
-        default=[0],
-        help="Length (diameter), height, width in millimeters",
+        default=[0.1, 0.1, 0.1],
+        help="Sample Parameters",
     )
 
     parser.add_argument(
@@ -1833,7 +1800,6 @@ def main():
             u_vector=args.uvector,
             v_vector=args.vvector,
             params=args.parameters,
-            shape=args.shape,
             filename=args.filename,
         )
 

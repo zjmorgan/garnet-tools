@@ -1,134 +1,13 @@
+import sys
+
 import numpy as np
 
-from mantid.simpleapi import CreateSampleWorkspace, LoadCIF, mtd
-
-from garnet.reduction.plan import load_YAML, save_YAML
-from garnet.utilities.reflections import AbsorptionCorrection, PrunePeaks
+from garnet.utilities.reflections import AbsorptionCorrection, Peaks
 from garnet.utilities.refinement import NuclearStructureRefinement
 
-
-class CrystalStructure:
-    def __init__(self, filename):
-        CreateSampleWorkspace(OutputWorkspace="crystal")
-        LoadCIF(Workspace="crystal", InputFile=filename)
-
-    def get_space_group(self):
-        cryst_struct = mtd["crystal"].sample().getCrystalStructure()
-
-        return cryst_struct.getSpaceGroup().getHMSymbol().strip()
-
-    def get_lattice_constants(self):
-        cryst_struct = mtd["crystal"].sample().getCrystalStructure()
-
-        uc = cryst_struct.getUnitCell()
-
-        params = uc.a(), uc.b(), uc.c(), uc.alpha(), uc.beta(), uc.gamma()
-
-        return params
-
-    def get_unit_cell_volume(self):
-        cryst_struct = mtd["crystal"].sample().getCrystalStructure()
-
-        return cryst_struct.getUnitCell().volume()
-
-    def get_scatterers(self):
-        cryst_struct = mtd["crystal"].sample().getCrystalStructure()
-
-        scatterers = cryst_struct.getScatterers()
-
-        scatterers = [atm.split(" ") for atm in list(scatterers)]
-
-        scatterers = [
-            [val if val.isalpha() else float(val) for val in scatterer[:-1]]
-            for scatterer in scatterers
-        ]
-
-        return scatterers
-
-    def get_chemical_formula_z_parameter(self):
-        cryst_struct = mtd["crystal"].sample().getCrystalStructure()
-
-        sg = cryst_struct.getSpaceGroup()
-
-        scatterers = self.get_scatterers()
-
-        atom_dict = {}
-
-        for scatterer in scatterers:
-            atom, x, y, z, occ = scatterer
-            n = len(sg.getEquivalentPositions([x, y, z]))
-            if atom_dict.get(atom) is None:
-                atom_dict[atom] = [n], [occ]
-            else:
-                ns, occs = atom_dict[atom]
-                ns.append(n)
-                occs.append(occ)
-                atom_dict[atom] = ns, occs
-
-        chemical_formula = []
-
-        n_atm = []
-        n_wgt = []
-
-        for key in atom_dict.keys():
-            ns, occs = atom_dict[key]
-            n_atm.append(np.sum(ns))
-            n_wgt.append(np.sum(np.multiply(ns, occs)))
-            if key.isalpha():
-                chemical_formula.append(key + "{:.3g}")
-            else:
-                chemical_formula.append("(" + key + ")" + "{:.3g}")
-
-        Z = np.gcd.reduce(n_atm)
-        n = np.divide(n_wgt, Z)
-
-        chemical_formula = "-".join(chemical_formula).format(*n)
-
-        return chemical_formula, float(Z)
-
-    def add_material_info(self, filename):
-        params = load_YAML(filename)
-
-        chemical_formula, Z = self.get_chemical_formula_z_parameter()
-
-        material = {}
-        material["ChemicalFormula"] = chemical_formula
-        material["ZParameter"] = Z
-        material["SpaceGroup"] = self.get_space_group()
-        material["Sites"] = self.get_scatterers()
-
-        params["Material"] = material
-
-        save_YAML(params, filename)
-
-
-class SampleParameters:
-    def __init__(self, shape="sphere", u_vector=[0, 0, 1], v_vector=[1, 0, 0]):
-        self.set_sample_shape(shape)
-
-        self.u_vector = u_vector
-        self.v_vector = v_vector
-
-    def set_sample_shape(self, shape):
-        if shape.lower() == "sphere":
-            self.shape = "Sphere"
-        elif shape.lower() == "cylinder":
-            self.shape = "Cylinder"
-        else:
-            self.shape = "FlatPlate"
-
-    def add_sample_info(self, filename):
-        params = load_YAML(filename)
-
-        sample = {}
-        sample["Shape"] = self.shape
-        sample["DepthWidthHeight"] = [0.1, 0.1, 0.1]
-        sample["IndexAlongDepth"] = self.u_vector
-        sample["IndexTangentHeight"] = self.v_vector
-
-        params["Sample"] = sample
-
-        save_YAML(params, filename)
+from garnet.reduction.plan import load_YAML, save_YAML
+from garnet.reduction.crystallography import space_groups, space_point
+from garnet.reduction.integration import Integration
 
 
 class StructureAnalysis:
@@ -137,22 +16,75 @@ class StructureAnalysis:
             "Filename": None,
             "ExtinctionModel": "Type II",
             "RefineAbsorption": False,
-            "SpaceGroup": "I a -3 d",
             "ChemicalFormula": "Yb3-Al5-O12",
         }
 
         defaults.update(config)
 
-        self.space_group = defaults.get("SpaceGroup")
+        space_group = defaults.get("SpaceGroup")
+        point_group = None
+        if space_group is not None:
+            space_group = space_groups.get(space_group)
+            point_group = space_point.get(space_group)
+
+        self.space_group = space_group
+        self.point_group = point_group
+
         self.sites = defaults.get("Sites")
 
-        self.refine_off = defaults.get("RefineAbsorption")
+        self.refine_abs = defaults.get("RefineAbsorption")
 
-    # def refimenent(self):
-    #     nuclear = NuclearStructureRefinement(
-    #         cell, space_group, sites, filename
-    #     )
-    #     nuclear.refine(n_iter=25)
-    #     nuclear.plot_result()
-    #     nuclear.plot_sample_shape()
-    #     nuclear.save_corrected_peaks()
+        if self.refine_abs:
+            assert self.space_group is not None
+            assert self.sites is not None
+
+        self.load_peaks()
+        self.refimenent()
+        self.save_peaks()
+
+    def load_peaks(self):
+        self.peaks = Peaks("peaks", self.filename, None, self.point_group)
+        self.peaks.load_peaks()
+
+    def save_peaks(self):
+        self.peaks.save_peaks()
+
+    def apply_correction(self):
+        if (np.array(self.parameters) > 0).all():
+            AbsorptionCorrection(
+                "peaks",
+                self.formula,
+                self.zparameter,
+                u_vector=self.uvector,
+                v_vector=self.vvector,
+                params=self.parameters,
+                filename=self.filename,
+            )
+
+    def refimenent(self):
+        nuclear = NuclearStructureRefinement(
+            self.cell, self.space_group, self.sites, self.filename
+        )
+        nuclear.refine(n_iter=10)
+        nuclear.plot_result()
+        nuclear.plot_sample_shape()
+        nuclear.save_corrected_peaks()
+
+
+if __name__ == "__main__":
+    filename = sys.argv[1]
+
+    params = load_YAML(filename)
+
+    config = {}
+    if params.get("Sample") is not None:
+        config.update(params["Sample"])
+    if params.get("Material") is not None:
+        config.update(params["Material"])
+    if params.get("Integration") is not None:
+        config.update(params["Integration"])
+
+    inst = Integration(params)
+    config["Filename"] = inst.get_file()
+
+    StructureAnalysis(config)

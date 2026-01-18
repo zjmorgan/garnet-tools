@@ -5,6 +5,8 @@ directory = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(directory)
 
 import numpy as np
+import pyvista as pv
+
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
@@ -14,7 +16,13 @@ from scipy.spatial.transform import Rotation
 
 from lmfit import Minimizer, Parameters, fit_report
 
-from mantid.simpleapi import LoadNexus, SaveNexus, mtd
+from mantid.simpleapi import (
+    LoadNexus,
+    SaveNexus,
+    CreateSampleWorkspace,
+    LoadSampleShape,
+    mtd,
+)
 from mantid.geometry import (
     CrystalStructure,
     ReflectionGenerator,
@@ -403,38 +411,40 @@ class NuclearStructureRefinement:
 
         self.params = params
 
-    def add_absorption_extinction_parameters(self, params):
-        params.add("param", value=0.1, min=np.finfo(float).eps, max=np.inf)
+    def add_absorption_extinction_parameters(self, params, absorption=True):
+        params.add("param", value=1, min=np.finfo(float).eps, max=np.inf)
+
+        angles = ["alpha", "beta", "gamma"]
 
         for i in range(3):
             params.add(
-                "coeff_{}".format(i),
+                "coeff_{}".format(angles[i]),
                 value=0.0,
                 min=-180,
                 max=180,
-                vary=False,
+                vary=absorption,
             )
 
         params.add(
-            "coeff_3",
-            value=0.1,
-            min=0.01,
+            "coeff_thickness",
+            value=0.001,
+            min=0.0001,
             max=1.0,
-            vary=False,
+            vary=absorption,
         )
         params.add(
-            "coeff_4",
+            "coeff_width",
             value=1.0,
             min=0.2,
             max=5,
-            vary=False,
+            vary=absorption,
         )
         params.add(
-            "coeff_5",
+            "coeff_height",
             value=1.0,
             min=0.2,
             max=5,
-            vary=False,
+            vary=absorption,
         )
 
         self.params = params
@@ -457,8 +467,10 @@ class NuclearStructureRefinement:
         param = params["param"].value
         scale = params["scale"].value
 
+        names = ["alpha", "beta", "gamma", "thickness", "width", "height"]
+
         coeffs = np.array(
-            [params["coeff_{}".format(i)].value for i in range(6)]
+            [params["coeff_{}".format(names[i])].value for i in range(6)]
         )
 
         return sites, param, scale, coeffs
@@ -598,7 +610,7 @@ class NuclearStructureRefinement:
                 2 * self.equiv[:, 0] * self.equiv[:, 1],
             ]
 
-            T = np.clip(np.exp(-np.einsum("ij,jk->ik", beta, h2)), 0, 1)
+            T = np.exp(-np.einsum("ij,jk->ik", beta, h2))
 
             occ = params[variable.format("occ")].value
 
@@ -872,7 +884,7 @@ class NuclearStructureRefinement:
                 self.objective_structure,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="neglogentropy",
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
@@ -904,7 +916,7 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="neglogentropy",
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
@@ -927,7 +939,7 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="neglogentropy",
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
@@ -1022,7 +1034,10 @@ class NuclearStructureRefinement:
         fig.savefig(output + "_ref.pdf", bbox_inches="tight")
 
     def save_corrected_peaks(self):
-        """Apply absorption corrections to all peaks and save to new file."""
+        """
+        Apply absorption corrections to all peaks and save to new file.
+
+        """
         output = os.path.splitext(self.filename)[0] + "_corr.nxs"
 
         LoadNexus(Filename=self.filename, OutputWorkspace="peaks_corr")
@@ -1073,72 +1088,82 @@ class NuclearStructureRefinement:
         SaveNexus(InputWorkspace="peaks_corr", Filename=output)
 
     def plot_sample_shape(self):
-        """Plot the refined ellipsoidal sample shape with beam directions."""
+        """
+        Plot the refined ellipsoidal sample shape with beam directions.
+
+        """
         output = os.path.splitext(self.filename)[0]
 
-        alpha, beta, gamma, scale, ratio_b, ratio_c = self.coeffs
+        params = self.ellipsoid_parameters(self.coeffs)
+        alpha, beta, gamma, thickness, width, height = params
 
-        a = scale * 10
-        b = scale * ratio_b * 10
-        c = scale * ratio_c * 10
+        width *= 10
+        thickness *= 10
+        height *= 10
 
-        u = np.linspace(0, 2 * np.pi, 9)
-        v = np.arccos(np.linspace(-1, 1, 9))
-        U, V = np.meshgrid(u, v)
+        sph = pv.Icosphere(radius=0.5)
 
-        X = a * np.sin(V) * np.cos(U)
-        Y = b * np.sin(V) * np.sin(U)
-        Z = c * np.cos(V)
+        ell = sph.scale([width, height, thickness], inplace=False)
+        ell.save(output + ".stl")
 
-        R = Rotation.from_euler(
-            "xyz", [alpha, beta, gamma], degrees=True
-        ).as_matrix()
-        coords = np.stack([X.ravel(), Y.ravel(), Z.ravel()], axis=1)
-        rotated = coords @ R.T
+        CreateSampleWorkspace(OutputWorkspace="sample")
 
-        X_rot = rotated[:, 0].reshape(X.shape)
-        Y_rot = rotated[:, 1].reshape(Y.shape)
-        Z_rot = rotated[:, 2].reshape(Z.shape)
-
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection="3d")
-
-        ax.plot_surface(
-            X_rot,
-            Y_rot,
-            Z_rot,
-            cmap="viridis",
-            antialiased=True,
+        LoadSampleShape(
+            InputWorkspace="sample",
+            Filename=output + ".stl",
+            Scale="mm",
+            XDegrees=alpha,
+            YDegrees=beta,
+            ZDegrees=gamma,
+            OutputWorkspace="sample",
         )
 
-        max_range = max(a, b, c)
-        ax.set_xlim([-max_range, max_range])
-        ax.set_ylim([-max_range, max_range])
-        ax.set_zlim([-max_range, max_range])
+        hkl = np.eye(3)
+        reciprocal_lattice = np.matmul(self.UB, hkl)
 
-        ax.contour(
-            X_rot, Y_rot, Z_rot, zdir="x", offset=-max_range, cmap="binary"
-        )
-        ax.contour(
-            X_rot, Y_rot, Z_rot, zdir="y", offset=-max_range, cmap="binary"
-        )
-        ax.contour(
-            X_rot, Y_rot, Z_rot, zdir="z", offset=-max_range, cmap="binary"
+        shape = mtd["sample"].sample().getShape()
+        mesh = shape.getMesh() * 1000
+
+        mesh_polygon = Poly3DCollection(
+            mesh,
+            edgecolors="k",
+            facecolors="w",
+            alpha=0.5,
+            linewidths=0.1,
         )
 
-        ax.grid(False)
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
+        D, R, Q = self.calculate_ellipsoid_surface(self.coeffs)
 
-        ax.set_xlabel("X [mm]")
-        ax.set_ylabel("Y [mm]")
-        ax.set_zlabel("Z [mm]")
-        ax.set_title(
-            f"Sample Shape (a={a:.3f}, b={b:.3f}, c={c:.3f} mm)\n"
-            f"Orientation: α={alpha:.1f}°, β={beta:.1f}°, γ={gamma:.1f}°"
+        UB_inv = np.linalg.inv(self.UB)
+
+        v, w, u = R[:, 0], R[:, 1], R[:, 2]
+
+        v, w, u = UB_inv @ v, UB_inv @ w, UB_inv @ u
+
+        u /= np.max(np.abs(u))
+        v /= np.max(np.abs(v))
+        w /= np.max(np.abs(w))
+
+        fig, ax = plt.subplots(
+            subplot_kw={"projection": "mantid3d", "proj_type": "persp"}
         )
-        ax.set_box_aspect([1, 1, 1])
+        ax.add_collection3d(mesh_polygon)
+        ax.set_proj_type("ortho")
+
+        size = "thickness: {:.2} width: {:.2} height: {:.2} mm".format(
+            thickness, width, height
+        )
+        u_vector = "u = [{:.2f} {:.2f} {:.2f}] ".format(*u)
+        v_vector = "v = [{:.2f} {:.2f} {:.2f}] ".format(*v)
+        w_vector = "w = [{:.2f} {:.2f} {:.2f}] ".format(*w)
+
+        ax.set_title(size + "\n" + u_vector + " " + v_vector + " " + w_vector)
+        ax.set_xlabel("x [mm]")
+        ax.set_ylabel("y [mm]")
+        ax.set_zlabel("z [mm]")
+
+        ax.set_mesh_axes_equal(mesh)
+        ax.set_box_aspect((1, 1, 1))
 
         colors = ["r", "g", "b"]
         origin = (
@@ -1146,24 +1171,24 @@ class NuclearStructureRefinement:
             ax.get_ylim3d()[1],
             ax.get_zlim3d()[1],
         )
-        origin = (0, 0, 0)
-        factor = max_range / 4
-        offset = max_range / 2
+
+        lims = ax.get_xlim3d()
+        factor = (lims[1] - lims[0]) / 4
+        origin = (lims[1] - lims[0]) / 4
 
         for j in range(3):
-            v = self.UB[:, j]
-            vector = v / np.linalg.norm(v)
+            vector = reciprocal_lattice[:, j]
+            vector = vector / np.linalg.norm(vector)
             ax.quiver(
-                origin[0] + offset,
-                origin[1] + offset,
-                origin[2] + offset,
+                origin,
+                origin,
+                origin,
                 vector[0],
                 vector[1],
                 vector[2],
                 length=factor,
                 color=colors[j],
                 linestyle="-",
-                pivot="tail",
             )
 
             ax.view_init(vertical_axis="y", elev=27, azim=50)
@@ -1172,38 +1197,31 @@ class NuclearStructureRefinement:
         fig.savefig(output + "_sample_shape.pdf", bbox_inches="tight", dpi=150)
         plt.close(fig)
 
-    def calculate_ellipsoid_surface(self, coeffs):
-        alpha, beta, gamma, scale, ratio_b, ratio_c = coeffs
+    def ellipsoid_parameters(self, coeffs):
+        alpha, beta, gamma, scale, ratio_1, ratio_2 = coeffs
 
-        a = scale
-        b = scale * ratio_b
-        c = scale * ratio_c
+        thickness = scale
+        width = scale * ratio_1
+        height = scale * ratio_2
+
+        return alpha, beta, gamma, thickness, width, height
+
+    def calculate_ellipsoid_surface(self, coeffs):
+        params = self.ellipsoid_parameters(coeffs)
+        alpha, beta, gamma, thickness, width, height = params
 
         R = Rotation.from_euler(
-            "xyz", [alpha, beta, gamma], degrees=True
+            "ZYX", [gamma, beta, alpha], degrees=True
         ).as_matrix()
 
-        D = np.diag([1.0 / a**2, 1.0 / b**2, 1.0 / c**2])
+        D = np.diag([1 / width**2, 1 / height**2, 1 / thickness**2]) / 4
 
-        return R @ D @ R.T
+        return D, R, R @ D @ R.T
 
     def absorption_correction(self, coeffs):
-        alpha, beta, gamma, scale, ratio_b, ratio_c = coeffs
+        D, R, Q = self.calculate_ellipsoid_surface(coeffs)
 
-        a = scale
-        b = scale * ratio_b
-        c = scale * ratio_c
-
-        R = (
-            Rotation.from_euler("xyz", [alpha, beta, gamma], degrees=True)
-            .as_matrix()
-            .astype(np.float32)
-        )
-
-        D = np.diag([1.0 / a**2, 1.0 / b**2, 1.0 / c**2])
-        Q = R @ D @ R.T
-
-        S = (R @ np.diag([a, b, c])).astype(np.float32)
+        S = (R @ np.diag(1 / np.sqrt(np.diag(D)))).astype(np.float32)
         y = self.sample_points @ S.T
         yQ = y @ Q
         cquad = np.einsum("ij,ij->i", yQ, y) - 1.0
@@ -1293,18 +1311,18 @@ if __name__ == "__main__":
         ["O", -0.03, 0.05, 0.149, 1, 0.0023],
     ]
 
-    # filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
+    filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
 
-    # cell = [4.516, 4.516, 8.107, 90, 90, 120]
-    # space_group = "P 63/m m c"
-    # sites = [
-    #     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
-    #     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
-    #     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
-    # ]
+    cell = [4.516, 4.516, 8.107, 90, 90, 120]
+    space_group = "P 63/m m c"
+    sites = [
+        ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
+        ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
+        ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
+    ]
 
     nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-    nuclear.refine(n_iter=25)
+    nuclear.refine(n_iter=100)
     nuclear.plot_result()
     nuclear.plot_sample_shape()
     nuclear.save_corrected_peaks()
