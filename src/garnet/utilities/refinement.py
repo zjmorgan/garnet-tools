@@ -4,6 +4,9 @@ import sys
 directory = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(directory)
 
+directory = os.path.abspath(os.path.join(directory, "../.."))
+sys.path.append(directory)
+
 import numpy as np
 import pyvista as pv
 
