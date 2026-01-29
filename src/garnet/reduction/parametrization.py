@@ -486,9 +486,11 @@ class Parametrization(SubPlan):
 
         for ind, file in enumerate(files):
             UB_file = file.replace(".nxs", ".mat")
-
             if os.path.exists(UB_file):
                 os.remove(UB_file)
+            STL_file = file.replace(".nxs", ".stl")
+            if os.path.exists(STL_file):
+                os.remove(STL_file)
 
         data.save_histograms(data_file, "data", sample_logs=True)
         data.save_histograms(norm_file, "norm", sample_logs=True)

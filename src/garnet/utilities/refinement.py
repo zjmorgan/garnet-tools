@@ -14,7 +14,7 @@ import scipy.linalg
 import scipy.interpolate
 from scipy.spatial.transform import Rotation
 
-from lmfit import Minimizer, Parameters, fit_report
+from lmfit import Minimizer, Parameters
 
 from mantid.simpleapi import (
     LoadNexus,
@@ -32,12 +32,12 @@ from mantid.kernel import Atom, MaterialBuilder, V3D
 
 
 class NuclearStructureRefinement:
-    def __init__(self, cell, space_group, sites, filename):
+    def __init__(self, cell, space_group, sites, filename, parameters=None):
         self.sites = []
         for site in sites:
-            atm, x, y, z, occ, U = site
+            atm, x, y, z, occ = site
             x, y, z = self._wrap([x, y, z])
-            self.sites.append([atm, x, y, z, occ, U])
+            self.sites.append([atm, x, y, z, occ, 0])
 
         self.cell = cell
         self.space_group = space_group
@@ -50,11 +50,18 @@ class NuclearStructureRefinement:
         self.load_hkls(filename)
 
         self.models = [
-            "type I gaussian",
-            "type I lorentzian",
-            "type II",
+            "type i gaussian",
+            "type i lorentzian",
+            "type ii",
             "shelx",
         ]
+
+        self.thickness = 0.001
+        self.width_ratio = 1
+        self.height_ratio = 1
+
+        if parameters is not None:
+            self.update_sample(parameters)
 
         self.generate_parameters()
         self.spherical_extinction()
@@ -157,18 +164,20 @@ class NuclearStructureRefinement:
 
         symops = space_group.getSymmetryOperationStrings()
 
-        self.S = np.zeros((len(symops), 3, 4))
+        S = np.zeros((len(symops), 3, 4))
 
-        self.S[..., 0] = [
+        S[..., 0] = [
             self._eval(op, 1, 0, 0) - self._eval(op, 0, 0, 0) for op in symops
         ]
-        self.S[..., 1] = [
+        S[..., 1] = [
             self._eval(op, 0, 1, 0) - self._eval(op, 0, 0, 0) for op in symops
         ]
-        self.S[..., 2] = [
+        S[..., 2] = [
             self._eval(op, 0, 0, 1) - self._eval(op, 0, 0, 0) for op in symops
         ]
-        self.S[..., 3] = [self._eval(op, 0, 0, 0) for op in symops]
+        S[..., 3] = [self._eval(op, 0, 0, 0) for op in symops]
+
+        self.S = S
 
     def generate_parameters(self):
         params = Parameters()
@@ -177,11 +186,11 @@ class NuclearStructureRefinement:
 
         for i, (site, N, x0) in enumerate(zip(self.sites, self.null, self.x0)):
             name, x, y, z, occ, Uiso = site
-            variable = "{}{}_".format(name, i) + "{}"
+            var = "{}{}_".format(name, i) + "{}"
 
             key = tuple(np.round([x, y, z], 6))
             if visits.get(key) is None:
-                visits[key] = variable
+                visits[key] = var
 
             N_inv = np.linalg.pinv(N)
 
@@ -189,24 +198,22 @@ class NuclearStructureRefinement:
 
             for j, val in enumerate(u):
                 params.add(
-                    variable.format("u{}".format(j)),
+                    var.format("u{}".format(j)),
                     value=val,
                     min=-10,
                     max=10,
                 )
 
-            params.add(variable.format("x"), value=x, min=0, max=1)
-            params.add(variable.format("y"), value=y, min=0, max=1)
-            params.add(variable.format("z"), value=z, min=0, max=1)
+            params.add(var.format("x"), value=x, min=0, max=1)
+            params.add(var.format("y"), value=y, min=0, max=1)
+            params.add(var.format("z"), value=z, min=0, max=1)
 
             n = len(u)
             if n > 0:
                 x_const = "+".join(
                     ["{}".format(x0[0])]
                     + [
-                        "{}*{}".format(
-                            variable.format("u{}".format(j)), N[0, j]
-                        )
+                        "{}*{}".format(var.format("u{}".format(j)), N[0, j])
                         for j in range(n)
                         if not np.isclose(N[0, j], 0)
                     ]
@@ -214,9 +221,7 @@ class NuclearStructureRefinement:
                 y_const = "+".join(
                     ["{}".format(x0[1])]
                     + [
-                        "{}*{}".format(
-                            variable.format("u{}".format(j)), N[1, j]
-                        )
+                        "{}*{}".format(var.format("u{}".format(j)), N[1, j])
                         for j in range(n)
                         if not np.isclose(N[1, j], 0)
                     ]
@@ -224,32 +229,30 @@ class NuclearStructureRefinement:
                 z_const = "+".join(
                     ["{}".format(x0[2])]
                     + [
-                        "{}*{}".format(
-                            variable.format("u{}".format(j)), N[2, j]
-                        )
+                        "{}*{}".format(var.format("u{}".format(j)), N[2, j])
                         for j in range(n)
                         if not np.isclose(N[2, j], 0)
                     ]
                 )
                 if np.any(N[0, :]):
-                    params[variable.format("x")].set(expr=x_const)
+                    params[var.format("x")].set(expr=x_const)
                 else:
-                    params[variable.format("x")].set(vary=False)
+                    params[var.format("x")].set(vary=False)
                 if np.any(N[1, :]):
-                    params[variable.format("y")].set(expr=y_const)
+                    params[var.format("y")].set(expr=y_const)
                 else:
-                    params[variable.format("y")].set(vary=False)
+                    params[var.format("y")].set(vary=False)
                 if np.any(N[2, :]):
-                    params[variable.format("z")].set(expr=z_const)
+                    params[var.format("z")].set(expr=z_const)
                 else:
-                    params[variable.format("z")].set(vary=False)
+                    params[var.format("z")].set(vary=False)
             else:
-                params[variable.format("x")].set(vary=False)
-                params[variable.format("y")].set(vary=False)
-                params[variable.format("z")].set(vary=False)
+                params[var.format("x")].set(vary=False)
+                params[var.format("y")].set(vary=False)
+                params[var.format("z")].set(vary=False)
 
             params.add(
-                variable.format("occ"),
+                var.format("occ"),
                 value=occ,
                 min=0,
                 max=1,
@@ -258,32 +261,20 @@ class NuclearStructureRefinement:
 
         for i, (site, N) in enumerate(zip(self.sites, self.null_disp)):
             name, x, y, z, occ, Uiso = site
-            variable = "{}{}_".format(name, i) + "{}"
+            var = "{}{}_".format(name, i) + "{}"
 
-            params.add(
-                variable.format("beta11"), value=0.0, min=-np.inf, max=np.inf
-            )
-            params.add(
-                variable.format("beta22"), value=0.0, min=-np.inf, max=np.inf
-            )
-            params.add(
-                variable.format("beta33"), value=0.0, min=-np.inf, max=np.inf
-            )
-            params.add(
-                variable.format("beta23"), value=0.0, min=-np.inf, max=np.inf
-            )
-            params.add(
-                variable.format("beta13"), value=0.0, min=-np.inf, max=np.inf
-            )
-            params.add(
-                variable.format("beta12"), value=0.0, min=-np.inf, max=np.inf
-            )
+            params.add(var.format("beta11"), value=0, min=-np.inf, max=np.inf)
+            params.add(var.format("beta22"), value=0, min=-np.inf, max=np.inf)
+            params.add(var.format("beta33"), value=0, min=-np.inf, max=np.inf)
+            params.add(var.format("beta23"), value=0, min=-np.inf, max=np.inf)
+            params.add(var.format("beta13"), value=0, min=-np.inf, max=np.inf)
+            params.add(var.format("beta12"), value=0, min=-np.inf, max=np.inf)
 
             n = N.shape[1]
 
             for j in range(n):
                 params.add(
-                    variable.format("b{}".format(j)),
+                    var.format("b{}".format(j)),
                     value=0,
                     min=-np.inf,
                     max=np.inf,
@@ -292,117 +283,91 @@ class NuclearStructureRefinement:
             if n > 0:
                 beta11_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[0, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[0, j])
                         for j in range(n)
                         if not np.isclose(N[0, j], 0)
                     ]
                 )
                 beta22_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[1, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[1, j])
                         for j in range(n)
                         if not np.isclose(N[1, j], 0)
                     ]
                 )
                 beta33_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[2, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[2, j])
                         for j in range(n)
                         if not np.isclose(N[2, j], 0)
                     ]
                 )
                 beta23_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[3, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[3, j])
                         for j in range(n)
                         if not np.isclose(N[3, j], 0)
                     ]
                 )
                 beta13_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[4, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[4, j])
                         for j in range(n)
                         if not np.isclose(N[4, j], 0)
                     ]
                 )
                 beta12_const = "+".join(
                     [
-                        "{}*{}".format(
-                            variable.format("b{}".format(j)), N[5, j]
-                        )
+                        "{}*{}".format(var.format("b{}".format(j)), N[5, j])
                         for j in range(n)
                         if not np.isclose(N[5, j], 0)
                     ]
                 )
                 if np.any(N[0, :]):
-                    params[variable.format("beta11")].set(expr=beta11_const)
+                    params[var.format("beta11")].set(expr=beta11_const)
                 else:
-                    params[variable.format("beta11")].set(vary=False)
+                    params[var.format("beta11")].set(vary=False)
                 if np.any(N[1, :]):
-                    params[variable.format("beta22")].set(expr=beta22_const)
+                    params[var.format("beta22")].set(expr=beta22_const)
                 else:
-                    params[variable.format("beta22")].set(vary=False)
+                    params[var.format("beta22")].set(vary=False)
                 if np.any(N[2, :]):
-                    params[variable.format("beta33")].set(expr=beta33_const)
+                    params[var.format("beta33")].set(expr=beta33_const)
                 else:
-                    params[variable.format("beta33")].set(vary=False)
+                    params[var.format("beta33")].set(vary=False)
                 if np.any(N[3, :]):
-                    params[variable.format("beta23")].set(expr=beta23_const)
+                    params[var.format("beta23")].set(expr=beta23_const)
                 else:
-                    params[variable.format("beta23")].set(vary=False)
+                    params[var.format("beta23")].set(vary=False)
                 if np.any(N[4, :]):
-                    params[variable.format("beta13")].set(expr=beta13_const)
+                    params[var.format("beta13")].set(expr=beta13_const)
                 else:
-                    params[variable.format("beta13")].set(vary=False)
+                    params[var.format("beta13")].set(vary=False)
                 if np.any(N[5, :]):
-                    params[variable.format("beta12")].set(expr=beta12_const)
+                    params[var.format("beta12")].set(expr=beta12_const)
                 else:
-                    params[variable.format("beta12")].set(vary=False)
+                    params[var.format("beta12")].set(vary=False)
 
         for i, site in enumerate(self.sites):
             name, x, y, z, occ, Uiso = site
-            variable = "{}{}_".format(name, i) + "{}"
+            var = "{}{}_".format(name, i) + "{}"
 
             key = tuple(np.round([x, y, z], 6))
-            visited = visits.get(key)
-            if visited != variable:
-                params.add(variable.format("x"), expr=visited.format("x"))
-                params.add(variable.format("y"), expr=visited.format("y"))
-                params.add(variable.format("z"), expr=visited.format("z"))
-                params.add(
-                    variable.format("occ"), expr="1-" + visited.format("occ")
-                )
-
-                params.add(
-                    variable.format("beta11"), expr=visited.format("beta11")
-                )
-                params.add(
-                    variable.format("beta22"), expr=visited.format("beta22")
-                )
-                params.add(
-                    variable.format("beta33"), expr=visited.format("beta33")
-                )
-                params.add(
-                    variable.format("beta23"), expr=visited.format("beta23")
-                )
-                params.add(
-                    variable.format("beta13"), expr=visited.format("beta13")
-                )
-                params.add(
-                    variable.format("beta12"), expr=visited.format("beta12")
-                )
+            visit = visits.get(key)
+            if visit != var:
+                params.add(var.format("x"), expr=visit.format("x"))
+                params.add(var.format("y"), expr=visit.format("y"))
+                params.add(var.format("z"), expr=visit.format("z"))
+                params.add(var.format("occ"), expr="1-" + visit.format("occ"))
+                params.add(var.format("beta11"), expr=visit.format("beta11"))
+                params.add(var.format("beta22"), expr=visit.format("beta22"))
+                params.add(var.format("beta33"), expr=visit.format("beta33"))
+                params.add(var.format("beta23"), expr=visit.format("beta23"))
+                params.add(var.format("beta13"), expr=visit.format("beta13"))
+                params.add(var.format("beta12"), expr=visit.format("beta12"))
 
         self.add_absorption_extinction_parameters(params)
+        self.add_detector_run_scale_parameters(params)
 
         F2s = self.calculate_structure_factors(params)
         scale = self.calculate_scale_factor(F2s)
@@ -411,7 +376,15 @@ class NuclearStructureRefinement:
 
         self.params = params
 
-    def add_absorption_extinction_parameters(self, params, absorption=True):
+    def update_sample(self, parameters):
+        if type(parameters) is list:
+            self.thickness = parameters[0] / 10
+            self.width_ratio = parameters[1] / parameters[0]
+            self.height_ratio = parameters[2] / parameters[0]
+        else:
+            self.thickness = parameters
+
+    def add_absorption_extinction_parameters(self, params):
         params.add("param", value=1, min=np.finfo(float).eps, max=np.inf)
 
         angles = ["alpha", "beta", "gamma"]
@@ -422,44 +395,75 @@ class NuclearStructureRefinement:
                 value=0.0,
                 min=-180,
                 max=180,
-                vary=absorption,
             )
 
         params.add(
             "coeff_thickness",
-            value=0.001,
+            value=self.thickness,
             min=0.0001,
-            max=1.0,
-            vary=absorption,
+            max=5.0,
         )
         params.add(
             "coeff_width",
-            value=1.0,
+            value=self.width_ratio,
             min=0.2,
             max=5,
-            vary=absorption,
         )
         params.add(
             "coeff_height",
-            value=1.0,
+            value=self.height_ratio,
             min=0.2,
             max=5,
-            vary=absorption,
         )
 
         self.params = params
+
+    def add_detector_run_scale_parameters(self, params):
+        n = len(self.banks)
+        for i in range(n - 1):
+            params.add(
+                "det_{}".format(i),
+                value=1.0,
+                min=0,
+                max=np.inf,
+                vary=False,
+            )
+
+        params.add(
+            "det_{}".format(n - 1),
+            expr=str(n)
+            + "-"
+            + "-".join(["det_{}".format(i) for i in range(n - 1)]),
+        )
+
+        n = len(self.runs)
+        for i in range(n - 1):
+            params.add(
+                "run_{}".format(i),
+                value=1.0,
+                min=0,
+                max=np.inf,
+                vary=False,
+            )
+
+        params.add(
+            "run_{}".format(n - 1),
+            expr=str(n)
+            + "-"
+            + "-".join(["run_{}".format(i) for i in range(n - 1)]),
+        )
 
     def extract_parameters(self, params):
         sites = []
 
         for i, site in enumerate(self.sites):
             name, x, y, z, occ, Uiso = site
-            variable = "{}{}_".format(name, i) + "{}"
+            var = "{}{}_".format(name, i) + "{}"
 
-            x = params[variable.format("x")].value
-            y = params[variable.format("y")].value
-            z = params[variable.format("z")].value
-            occ = params[variable.format("occ")].value
+            x = params[var.format("x")].value
+            y = params[var.format("y")].value
+            z = params[var.format("z")].value
+            occ = params[var.format("occ")].value
             Uiso = 0
 
             sites.append([name, x, y, z, occ, Uiso])
@@ -473,20 +477,33 @@ class NuclearStructureRefinement:
             [params["coeff_{}".format(names[i])].value for i in range(6)]
         )
 
-        return sites, param, scale, coeffs
+        dets = np.array(
+            [params["det_{}".format(i)].value for i in range(len(self.banks))]
+        )
+
+        runs = np.array(
+            [params["run_{}".format(i)].value for i in range(len(self.runs))]
+        )
+
+        return sites, param, scale, coeffs, dets, runs
 
     def load_hkls(self, filename):
         LoadNexus(Filename=filename, OutputWorkspace="peaks")
 
+        self.extract_info()
+
+    def extract_info(self):
         self.UB = mtd["peaks"].sample().getOrientedLattice().getUB()
 
         lamdas, two_thetas, intensity, sigma = [], [], [], []
-        h, k, l, ri_hat, sf_hat = [], [], [], [], []
+        h, k, l, ri_hat, sf_hat, bank, run = [], [], [], [], [], [], []
 
         coverage_two_theta, coverage_az_phi = [], []
 
+        banks = mtd["peaks"].column("BankName")
+
         d_min = np.inf
-        for peak in mtd["peaks"]:
+        for i, peak in enumerate(mtd["peaks"]):
             hkl = peak.getIntHKL()
             mnp = peak.getIntMNP()
             lamda = peak.getWavelength()
@@ -500,6 +517,7 @@ class NuclearStructureRefinement:
 
             I = peak.getIntensity()
             sig = peak.getSigmaIntensity()
+            run_no = peak.getRunNumber()
 
             if mnp.norm2() == 0 and I > 3 * sig and np.isfinite(I):
                 lamdas.append(lamda)
@@ -514,6 +532,9 @@ class NuclearStructureRefinement:
 
                 ri_hat.append(ri)
                 sf_hat.append(sf)
+
+                bank.append(banks[i])
+                run.append(run_no)
 
         scale_factor = 10000 / np.nanpercentile(intensity, 99)
 
@@ -533,6 +554,12 @@ class NuclearStructureRefinement:
         self.equiv, self.inverse, self.counts = np.unique(
             self.hkls, return_inverse=True, return_counts=True, axis=0
         )
+
+        self.banks, self.detectors = np.unique(
+            bank, return_inverse=True, axis=0
+        )
+
+        self.runs, self.angles = np.unique(run, return_inverse=True, axis=0)
 
         self.I_obs = np.array(intensity)[mask] * scale_factor
         self.sig = np.array(sigma)[mask] * scale_factor
@@ -578,28 +605,30 @@ class NuclearStructureRefinement:
             zip(self.sites, self.transforms, self.transforms_disp, self.bs)
         ):
             name, x, y, z, occ, Uiso = site
-            variable = "{}{}_".format(name, i) + "{}"
+            var = "{}{}_".format(name, i) + "{}"
 
-            x = params[variable.format("x")].value
-            y = params[variable.format("y")].value
-            z = params[variable.format("z")].value
+            x = params[var.format("x")].value
+            y = params[var.format("y")].value
+            z = params[var.format("z")].value
 
             xyz = np.einsum("ijk,k->ij", transform, [x, y, z, 1])
 
             pf = np.exp(2j * np.pi * np.einsum("ij,kj->ik", xyz, self.equiv))
 
-            beta11 = params[variable.format("beta11")].value
-            beta22 = params[variable.format("beta22")].value
-            beta33 = params[variable.format("beta33")].value
-            beta23 = params[variable.format("beta23")].value
-            beta13 = params[variable.format("beta13")].value
-            beta12 = params[variable.format("beta12")].value
+            beta11 = params[var.format("beta11")].value
+            beta22 = params[var.format("beta22")].value
+            beta33 = params[var.format("beta33")].value
+            beta23 = params[var.format("beta23")].value
+            beta13 = params[var.format("beta13")].value
+            beta12 = params[var.format("beta12")].value
 
             beta = np.einsum(
                 "ijk,k->ij",
                 transform_disp,
                 [beta11, beta22, beta33, beta23, beta13, beta12],
             )
+
+            occ = params[var.format("occ")].value
 
             h2 = [
                 self.equiv[:, 0] ** 2,
@@ -611,8 +640,6 @@ class NuclearStructureRefinement:
             ]
 
             T = np.exp(-np.einsum("ij,jk->ik", beta, h2))
-
-            occ = params[variable.format("occ")].value
 
             Fs += np.sum(b * occ * pf * T, axis=0)
 
@@ -787,6 +814,12 @@ class NuclearStructureRefinement:
             yx = 1 / np.sqrt(1 + xx)
             return yx
 
+    def detector_bank_scale_factors(self, params):
+        return params[self.detectors]
+
+    def run_angle_scale_factors(self, params):
+        return params[self.angles]
+
     def cost(self, params, F2s, I_obs, sig):
         s = params["scale"].value
 
@@ -825,11 +858,16 @@ class NuclearStructureRefinement:
         current absorption/extinction parameters as fixed values.
         """
 
-        sites, param, scale, coeffs = self.extract_parameters(params)
+        all_params = self.extract_parameters(params)
+
+        sites, param, scale, coeffs, dets, runs = all_params
 
         F2s = self.calculate_structure_factors(params)
 
-        I_calc = F2s * self.y
+        c = self.detector_bank_scale_factors(dets)
+        k = self.run_angle_scale_factors(runs)
+
+        I_calc = F2s * self.y * c * k
 
         return (scale * I_calc - self.I_obs) / self.sig
 
@@ -841,24 +879,34 @@ class NuclearStructureRefinement:
         current structural model.
         """
 
-        sites, param, scale, coeffs = self.extract_parameters(params)
+        all_params = self.extract_parameters(params)
+
+        sites, param, scale, coeffs, dets, runs = all_params
 
         y_abs = self.absorption_correction(coeffs)
         y_ext = self.extinction_correction(param, self.F2s)
         y = y_abs * y_ext
 
-        I_calc = self.F2s * y
+        c = self.detector_bank_scale_factors(dets)
+        k = self.run_angle_scale_factors(runs)
+
+        I_calc = self.F2s * y * c * k
 
         wr = (scale * I_calc - self.I_obs) / self.sig
 
-        # num = np.nansum(wr**2)
-        # den = np.nansum((self.I_obs / self.sig) ** 2)
-        # Rw = np.sqrt(num / den) if den > 0 else 1.0
-
         return wr
 
-    def refine(self, report=True, cutoff=10, n_iter=3):
-        self.initialize_correction()
+    def refine(
+        self,
+        report=True,
+        cutoff=15,
+        n_iter=3,
+        abs_corr=True,
+        det_corr=False,
+        run_corr=False,
+        ext_model="shelx",
+    ):
+        self.initialize_correction(ext_model)
 
         fixed = []
         for name, par in self.params.items():
@@ -867,7 +915,7 @@ class NuclearStructureRefinement:
 
         for i in range(n_iter):
             self.F2s = self.calculate_structure_factors(self.params)
-            _, param, _, coeffs = self.extract_parameters(self.params)
+            _, param, _, coeffs, _, _ = self.extract_parameters(self.params)
             y_abs = self.absorption_correction(coeffs)
             y_ext = self.extinction_correction(param, self.F2s)
             self.y = y_abs * y_ext
@@ -884,7 +932,7 @@ class NuclearStructureRefinement:
                 self.objective_structure,
                 params,
                 nan_policy="omit",
-                reduce_fcn="neglogentropy",
+                reduce_fcn=None,
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
@@ -894,7 +942,7 @@ class NuclearStructureRefinement:
                     f"Iteration {i + 1}/{n_iter} - "
                     "Stage 1 (structure + scale)"
                 )
-                print(fit_report(result))
+                self.report(result, det_corr, run_corr)
 
             self.params = result.params
 
@@ -908,7 +956,7 @@ class NuclearStructureRefinement:
             params = self.params.copy()
             for name, par in params.items():
                 if name.startswith("coeff_"):
-                    par.vary = True
+                    par.vary = abs_corr
                 else:
                     par.vary = False
 
@@ -916,14 +964,14 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn="neglogentropy",
+                reduce_fcn=None,
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 2 (absorption)")
-                print(fit_report(result))
+                self.report(result, det_corr, run_corr)
 
             self.params = result.params
 
@@ -939,14 +987,60 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn="neglogentropy",
+                reduce_fcn=None,
             )
 
             result = out.minimize(method="leastsq", max_nfev=100)
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 3 (extinction)")
-                print(fit_report(result))
+                self.report(result, det_corr, run_corr)
+
+            self.params = result.params
+
+            # --- Stage 4: calibration only
+            params = self.params.copy()
+            for name, par in params.items():
+                if name.startswith("det_"):
+                    par.vary = det_corr
+                else:
+                    par.vary = False
+
+            out = Minimizer(
+                self.objective_correction,
+                params,
+                nan_policy="omit",
+                reduce_fcn=None,
+            )
+
+            result = out.minimize(method="leastsq", max_nfev=100)
+
+            if report:
+                print(f"Iteration {i + 1}/{n_iter} - " "Stage 4 (calibration)")
+                self.report(result, det_corr, run_corr)
+
+            self.params = result.params
+
+            # --- Stage 5: orientation only
+            params = self.params.copy()
+            for name, par in params.items():
+                if name.startswith("run_"):
+                    par.vary = run_corr
+                else:
+                    par.vary = False
+
+            out = Minimizer(
+                self.objective_correction,
+                params,
+                nan_policy="omit",
+                reduce_fcn=None,
+            )
+
+            result = out.minimize(method="leastsq", max_nfev=100)
+
+            if report:
+                print(f"Iteration {i + 1}/{n_iter} - " "Stage 5 (orientation)")
+                self.report(result, det_corr, run_corr)
 
             self.params = result.params
 
@@ -956,21 +1050,91 @@ class NuclearStructureRefinement:
 
             self.plot_sample_shape()
 
+            *_, dets, runs = self.extract_parameters(self.params)
+
+            self.save_detector_scales(dets)
+
         self.save_corrected_peaks()
 
-    def calculate_statistics(self, cutoff):
-        params = self.extract_parameters(self.params)
+    def report(self, result, det_corr, run_corr):
+        params = result.params
+        print("χ² = {:.2f}".format(result.chisqr))
+        print("χ²/dof = {:.2f}\n".format(result.redchi))
 
-        self.sites, self.param, self.scale, self.coeffs = params
+        all_params = self.extract_parameters(result.params)
+
+        sites, param, scale, coeffs, dets, runs = all_params
+
+        print("scale = {:1.4e}".format(scale))
+        print("ext = {:6.4f}".format(param))
+        print("abs : {:6.1f} {:6.1f} {:6.1f}".format(*coeffs[:3]))
+        print("    : {:6.4f} {:6.4f} {:6.4f}".format(*coeffs[3:]))
+        print("")
+
+        for i, site in enumerate(self.sites):
+            name, x, y, z, occ, Uiso = site
+            var = "{}{}_".format(name, i) + "{}"
+
+            x = params[var.format("x")].value
+            y = params[var.format("y")].value
+            z = params[var.format("z")].value
+
+            beta11 = params[var.format("beta11")].value
+            beta22 = params[var.format("beta22")].value
+            beta33 = params[var.format("beta33")].value
+            beta23 = params[var.format("beta23")].value
+            beta13 = params[var.format("beta13")].value
+            beta12 = params[var.format("beta12")].value
+
+            occ = params[var.format("occ")].value
+
+            print(
+                "{:3} : {:6.4f} {:6.4f} {:6.4f} {:6.4f}".format(
+                    name, x, y, z, occ
+                )
+            )
+            print(
+                "    : {:6.4f} {:6.4f} {:6.4f}".format(beta11, beta22, beta33)
+            )
+            print(
+                "    : {:6.4f} {:6.4f} {:6.4f}".format(beta23, beta13, beta12)
+            )
+
+        print("")
+
+        if run_corr:
+            for i in range(len(self.runs)):
+                print("#{:} | {:6.4f}".format(self.runs[i], runs[i]))
+            print("")
+
+        if det_corr:
+            for i in range(len(self.banks)):
+                print("#{:} | {:6.4f}".format(self.banks[i], dets[i]))
+            print("")
+
+    def calculate_statistics(self, cutoff):
+        all_params = self.extract_parameters(self.params)
+
+        (
+            self.sites,
+            self.param,
+            self.scale,
+            self.coeffs,
+            dets,
+            runs,
+        ) = all_params
 
         F2s = self.calculate_structure_factors(self.params)
 
         y_abs = self.absorption_correction(self.coeffs)
         y_ext = self.extinction_correction(self.param, F2s)
 
+        c = self.detector_bank_scale_factors(dets)
+        k = self.run_angle_scale_factors(runs)
+
         y = y_abs * y_ext
 
-        I_calc = F2s * y
+        I_calc = F2s * y * c * k
 
         scale = self.calculate_scale_factor(I_calc)
 
@@ -1005,6 +1169,15 @@ class NuclearStructureRefinement:
         self.R_ref = R * 100  # %
 
         print("R = {:.2f}%".format(self.R_ref))
+        print("----------")
+        print("")
+
+    def save_detector_scales(self, params):
+        output = os.path.splitext(self.filename)[0]
+        with open(output + "_det.txt", "w") as f:
+            for i in range(len(params)):
+                bank = self.banks[i].replace("bank", "")
+                f.write("{:4} {:.4f}\n".format(bank, params[i]))
 
     def plot_result(self):
         output = os.path.splitext(self.filename)[0]
@@ -1042,7 +1215,9 @@ class NuclearStructureRefinement:
 
         LoadNexus(Filename=self.filename, OutputWorkspace="peaks_corr")
 
-        _, param, scale, coeffs = self.extract_parameters(self.params)
+        all_params = self.extract_parameters(self.params)
+
+        _, param, scale, coeffs, dets, runs = all_params
 
         lamdas = []
         two_thetas = []
@@ -1144,6 +1319,10 @@ class NuclearStructureRefinement:
         v /= np.max(np.abs(v))
         w /= np.max(np.abs(w))
 
+        self.uvector = u
+        self.vvector = v
+        self.parameters = thickness, width, height
+
         fig, ax = plt.subplots(
             subplot_kw={"projection": "mantid3d", "proj_type": "persp"}
         )
@@ -1239,7 +1418,7 @@ class NuclearStructureRefinement:
         self.Tbar = Tbar
         return self.T
 
-    def prepare_absorption_table(self, N=50, seed=42, beta=3):
+    def prepare_absorption_table(self, N=1000, seed=42, beta=3):
         rng = np.random.default_rng(seed)
 
         v = rng.normal(size=(N, 3))
@@ -1261,7 +1440,7 @@ class NuclearStructureRefinement:
         sigma_tot = material.totalScatterXSection()
         sigma_abs = [material.absorbXSection(lamda) for lamda in self.lamda]
         self.mu = n * (sigma_tot + np.array(sigma_abs))
-        self.model = model
+        self.model = model.lower()
         self.c1 = self.f1[self.model](self.two_theta)
         self.c2 = self.f2[self.model](self.two_theta)
         self.prepare_absorption_table()
@@ -1297,32 +1476,37 @@ class NuclearStructureRefinement:
 
 # ---
 
-if __name__ == "__main__":
-    # filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-    filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-    filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
+# if __name__ == "__main__":
+# filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+# filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
+# filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
 
-    cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
-    space_group = "I a -3 d"
-    sites = [
-        ["Yb", 0.125, 0.0, 0.25, 1, 0.0023],
-        ["Al", 0.0, 0.0, 0.0, 1, 0.0023],
-        ["Al", 0.375, 0.0, 0.25, 1, 0.0023],
-        ["O", -0.03, 0.05, 0.149, 1, 0.0023],
-    ]
+# cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
+# space_group = "I a -3 d"
+# sites = [
+#     ["Yb", 0.125, 0.0, 0.25, 1, 0.0023],
+#     ["Al", 0.0, 0.0, 0.0, 1, 0.0023],
+#     ["Al", 0.375, 0.0, 0.25, 1, 0.0023],
+#     ["O", -0.03, 0.05, 0.149, 1, 0.0023],
+# ]
 
-    filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
+# filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
 
-    cell = [4.516, 4.516, 8.107, 90, 90, 120]
-    space_group = "P 63/m m c"
-    sites = [
-        ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
-        ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
-        ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
-    ]
+# cell = [4.516, 4.516, 8.107, 90, 90, 120]
+# space_group = "P 63/m m c"
+# sites = [
+#     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
+#     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
+#     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
+# ]
 
-    nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-    nuclear.refine(n_iter=100)
-    nuclear.plot_result()
-    nuclear.plot_sample_shape()
-    nuclear.save_corrected_peaks()
+# filename = "/SNS/TOPAZ/IPTS-31856/shared/2025B_Si_cal/Si_AG_cal_integration/Si_AG_cal_Cubic_F_d(min)=0.50_r(max)=0.20.nxs"
+# cell = [5.431, 5.431, 5.431, 90, 90, 90]
+# space_group = "F d -3 m"
+# sites = [["Si", 0.0, 0.0, 0.0, 1.0, 0.0023]]
+
+# nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
+# nuclear.refine(n_iter=50, abs_corr=True, det_corr=True, run_corr=True)
+# nuclear.plot_result()
+# nuclear.plot_sample_shape()
+# nuclear.save_corrected_peaks()

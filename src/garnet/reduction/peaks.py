@@ -79,6 +79,56 @@ class PeaksModel:
         self.edge_pixels = 0
         self.monitor_count = 1
 
+    def reset_satellites(self, peaks):
+        mod_mnp = []
+        mod_hkl = []
+
+        for peak in mtd[peaks]:
+            hkl = peak.getHKL()
+            int_hkl = peak.getIntHKL()
+            int_mnp = peak.getIntMNP()
+            if int_mnp.norm2() > 0:
+                mod_mnp.append(np.array(int_mnp))
+                mod_hkl.append(np.array(hkl - int_hkl))
+
+        ol = mtd[peaks].sample().getOrientedLattice()
+
+        if len(mod_mnp) > 0:
+            mod_vec = np.linalg.pinv(mod_mnp) @ np.array(mod_hkl)
+
+            self.mod_vec_1 = V3D(*mod_vec[0])
+            self.mod_vec_2 = V3D(*mod_vec[1])
+            self.mod_vec_3 = V3D(*mod_vec[2])
+            ol.setModVec1(self.mod_vec_1)
+            ol.setModVec2(self.mod_vec_2)
+            ol.setModVec3(self.mod_vec_3)
+
+            ol.setModUB(ol.getUB() @ ol.getModHKL())
+
+            max_order = ol.getMaxOrder()
+
+            self.max_order = max_order if max_order > 0 else 1
+            self.modUB = ol.getModUB().copy()
+            self.modHKL = ol.getModHKL().copy()
+
+            ol.setMaxOrder(self.max_order)
+
+        else:
+            self.max_order = 0
+            self.modUB = np.zeros((3, 3))
+            self.modHKL = np.zeros((3, 3))
+            self.mod_vec_1 = V3D(0, 0, 0)
+            self.mod_vec_2 = V3D(0, 0, 0)
+            self.mod_vec_3 = V3D(0, 0, 0)
+
+            ol.setMaxOrder(self.max_order)
+
+            ol.setModVec1(self.mod_vec_1)
+            ol.setModVec2(self.mod_vec_2)
+            ol.setModVec3(self.mod_vec_3)
+
+            ol.setModUB(self.modUB)
+
     def find_peaks(self, md, peaks, max_d, density=50, max_peaks=1000):
         """
         Harvest strong peak locations from Q-sample into a peaks table.
@@ -1237,6 +1287,18 @@ class PeaksModel:
             CopyEnvironment=False,
             CopyShape=False,
         )
+
+        ol = mtd[ws].sample().getOrientedLattice()
+        mod_vec_1 = V3D(*ol.getModVec(0))
+        mod_vec_2 = V3D(*ol.getModVec(1))
+        mod_vec_3 = V3D(*ol.getModVec(2))
+        max_order = ol.getMaxOrder()
+
+        ol = mtd[peaks].sample().getOrientedLattice()
+        ol.setMaxOrder(max_order)
+        ol.setModVec1(mod_vec_1)
+        ol.setModVec2(mod_vec_2)
+        ol.setModVec3(mod_vec_3)
 
     def add_peak(self, peaks, hkl):
         """

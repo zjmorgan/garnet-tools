@@ -14,18 +14,21 @@ from mantid.simpleapi import (
     Rebin,
     ApplyCalibration,
     Multiply,
+    Divide,
     PreprocessDetectorsToMD,
     ExtractMonitors,
     LoadMask,
     MaskDetectors,
-    MaskDetectorsIf,
-    ExtractMask,
     SetGoniometer,
+    LoadSampleShape,
+    SetSample,
+    MonteCarloAbsorption,
     LoadWANDSCD,
     HB3AAdjustSampleNorm,
     CorelliCrossCorrelate,
     NormaliseByCurrent,
     GroupDetectors,
+    CreateGroupingWorkspace,
     LoadEmptyInstrument,
     SolidAngle,
     CopyInstrumentParameters,
@@ -56,6 +59,7 @@ from mantid.simpleapi import (
     CompressEvents,
     GenerateEventsFilter,
     FilterEvents,
+    FilterBadPulses,
     CopySample,
     DeleteWorkspace,
     DeleteWorkspaces,
@@ -393,7 +397,7 @@ class BaseDataModel:
         else:
             return xmin, xmax, xmax - xmin
 
-    def calculate_binning_from_step(xmin, xmax, step):
+    def calculate_binning_from_step(self, xmin, xmax, step):
         """
         Determine the binning from step size.
 
@@ -423,7 +427,7 @@ class BaseDataModel:
             min_bin = xmin - 0.5 * step
             max_bin = xmax + 0.5 * step
 
-            return min_bin, max_bin, bins
+            return min_bin, max_bin, int(bins)
 
         else:
             return xmin, xmax, 1
@@ -569,21 +573,19 @@ class BaseDataModel:
         else:
             PlusMD(LHSWorkspace=merge, RHSWorkspace=ws, OutputWorkspace=merge)
 
-            if mtd[ws].getNumExperimentInfo() > 0:
-                for prop in mtd[ws].getExperimentInfo(0).run().getProperties():
-                    if prop.type in ["string", "number"]:
-                        log_type = (
-                            "String" if prop.type == "string" else "Number"
-                        )
-                        AddSampleLog(
-                            Workspace=merge,
-                            LogName=prop.name,
-                            LogText=str(prop.value),
-                            LogUnit=str(prop.units),
-                            LogType=log_type,
-                        )
+        if mtd[ws].getNumExperimentInfo() > 0:
+            for prop in mtd[ws].getExperimentInfo(0).run().getProperties():
+                if prop.type in ["string", "number"]:
+                    log_type = "String" if prop.type == "string" else "Number"
+                    AddSampleLog(
+                        Workspace=merge,
+                        LogName=prop.name,
+                        LogText=str(prop.value),
+                        LogUnit=str(prop.units),
+                        LogType=log_type,
+                    )
 
-            DeleteWorkspace(Workspace=ws)
+        DeleteWorkspace(Workspace=ws)
 
     def divide_histograms(self, ws, num, den):
         """
@@ -1318,13 +1320,17 @@ class LaueData(BaseDataModel):
                 FilterByTofMax=None,
             )
 
+            FilterBadPulses(
+                InputWorkspace=event_name, OutputWorkspace=event_name
+            )
+
         if type(runs) is list and mtd[event_name].isGroup():
             for run, ws in zip(runs, mtd[event_name].getNames()):
                 mtd[ws].run()["run_number"] = run
         else:
             mtd[event_name].run()["run_number"] = runs
 
-        if self.elastic == True and self.time_offset is not None:
+        if self.elastic and self.time_offset is not None:
             CopyInstrumentParameters(
                 InputWorkspace=self.ref_inst, OutputWorkspace=event_name
             )
@@ -1365,7 +1371,7 @@ class LaueData(BaseDataModel):
 
         return total_events / total_charge
 
-    def calculate_maximum_Q(self):
+    def calculate_maximum_Q(self, scale=np.sqrt(3)):
         """
         Update maximum Q.
 
@@ -1373,7 +1379,7 @@ class LaueData(BaseDataModel):
 
         lamda_min = np.min(self.wavelength_band)
 
-        self.Q_max = 4 * np.pi / lamda_min * np.sin(self.theta_max)
+        self.Q_max = 4 * np.pi / lamda_min * np.sin(self.theta_max) / scale
 
     def apply_calibration(
         self,
@@ -1506,6 +1512,12 @@ class LaueData(BaseDataModel):
             if not mtd.doesExist("solid_angle"):
                 SolidAngle(InputWorkspace=ws, OutputWorkspace="solid_angle")
 
+                # Divide(
+                #     LHSWorkspace="sa",
+                #     RHSWorkspace="solid_angle",
+                #     OutputWorkspace="sa",
+                # )
+
                 inds = mtd["solid_angle"].getIndicesFromDetectorIDs(
                     self.det_IDs
                 )
@@ -1522,6 +1534,13 @@ class LaueData(BaseDataModel):
             self.theta_max = 0.5 * np.max(two_theta)
 
             self.calculate_maximum_Q()
+
+            if not mtd.doesExist("group"):
+                CreateGroupingWorkspace(
+                    InputWorkspace=ws,
+                    GroupDetectorsBy="bank",
+                    OutputWorkspace="group",
+                )
 
     def mask_to_bank(self, event_name, bank_name):
         """
@@ -1563,8 +1582,8 @@ class LaueData(BaseDataModel):
                 OutputWorkspace="mask",
             )
 
-        if mtd.doesExist("sa_mask"):
-            MaskDetectors(Workspace=event_name, MaskedWorkspace="sa_mask")
+        if mtd.doesExist("sa"):
+            MaskDetectors(Workspace=event_name, MaskedWorkspace="sa")
 
         if mtd.doesExist("mask"):
             MaskDetectors(Workspace=event_name, MaskedWorkspace="mask")
@@ -1669,7 +1688,7 @@ class LaueData(BaseDataModel):
                 MinValues=Q_min_vals,
                 MaxValues=Q_max_vals,
                 OutputWorkspace=md_name,
-                PreprocDetectorsWS=preproc_dets,
+                PreprocDetectorsWS="-",  # preproc_dets,
                 SplitInto=2,
                 MaxRecursionDepth=10,
             )
@@ -1709,9 +1728,68 @@ class LaueData(BaseDataModel):
                 MinValues=Q_min_vals,
                 MaxValues=Q_max_vals,
                 OutputWorkspace=md_name,
-                PreprocDetectorsWS="detectors",
+                PreprocDetectorsWS="-",  # "detectors",
                 SplitInto=2,
                 MaxRecursionDepth=10,
+            )
+
+    def absorption_correction(self, event_name, shapestl, angles, material):
+        if shapestl is not None:
+            ConvertUnits(
+                InputWorkspace=event_name,
+                OutputWorkspace=event_name,
+                Target="Wavelength",
+            )
+
+            wl_min, wl_max = self.wavelength_band
+
+            Rebin(
+                InputWorkspace=event_name,
+                Params=[wl_min, (wl_max - wl_min) / 100, wl_max],
+                OutputWorkspace=event_name,
+            )
+
+            gon = mtd[event_name].run().getGoniometer()
+
+            omega, chi, phi = gon.getEulerAngles("YZY")
+
+            alpha, beta, gamma = angles
+
+            LoadSampleShape(
+                InputWorkspace=event_name,
+                Filename=shapestl,
+                Scale="mm",
+                XDegrees=alpha,
+                YDegrees=beta,
+                ZDegrees=gamma,
+                OutputWorkspace=event_name,
+            )
+
+            SetSample(
+                InputWorkspace=event_name,
+                Material=material,
+            )
+
+            SetGoniometer(
+                Workspace=event_name,
+                Axis0="{},0,1,0,1".format(omega),
+                Axis1="{},0,0,1,1".format(chi),
+                Axis2="{},0,1,0,1".format(phi),
+            )
+
+            MonteCarloAbsorption(
+                InputWorkspace=event_name,
+                SparseInstrument=True,
+                NumberOfDetectorRows=10,
+                NumberOfDetectorColumns=20,
+                Interpolation="Linear",
+                OutputWorkspace="absorption",
+            )
+
+            Divide(
+                LHSWorkspace=event_name,
+                RHSWorkspace="absorption",
+                OutputWorkspace=event_name,
             )
 
     def load_generate_normalization(self, vanadium_file, flux_file):
@@ -1735,16 +1813,8 @@ class LaueData(BaseDataModel):
 
             RemoveLogs(Workspace="sa")
 
-            MaskDetectorsIf(
-                InputWorkspace="sa", Operator="LessEqual", OutputWorkspace="sa"
-            )
-
-            ExtractMask(InputWorkspace="sa", OutputWorkspace="sa_mask")
-
         if not mtd.doesExist("flux"):
             LoadNexus(Filename=flux_file, OutputWorkspace="flux")
-
-            # NormaliseSpectra(InputWorkspace="flux", OutputWorkspace="flux")
 
             RemoveLogs(Workspace="flux")
 
@@ -1826,7 +1896,13 @@ class LaueData(BaseDataModel):
                 OutputWorkspace=event_name,
             )
 
-    def load_background(self, filename, event_name):
+    def load_background(
+        self,
+        filename,
+        event_name,
+        detector_calibration=None,
+        tube_calibration=None,
+    ):
         """
         Load a background file and scale to data.
 
@@ -1842,6 +1918,22 @@ class LaueData(BaseDataModel):
         if not mtd.doesExist("bkg_md") and filename is not None:
             if not mtd.doesExist("bkg"):
                 Load(Filename=filename, OutputWorkspace="bkg")
+
+                ConvertUnits(
+                    InputWorkspace="bkg",
+                    OutputWorkspace="bkg",
+                    Target="TOF",
+                )
+
+                self.apply_calibration(
+                    "bkg", detector_calibration, tube_calibration
+                )
+
+                if mtd.doesExist("sa"):
+                    MaskDetectors(Workspace="bkg", MaskedWorkspace="sa")
+
+                if mtd.doesExist("mask"):
+                    MaskDetectors(Workspace="bkg", MaskedWorkspace="mask")
 
                 ConvertUnits(
                     InputWorkspace="bkg",
@@ -1865,14 +1957,8 @@ class LaueData(BaseDataModel):
                     OutputWorkspace="bkg",
                 )
 
-                MaskDetectorsIf(
-                    InputWorkspace="bkg",
-                    Operator="LessEqual",
-                    OutputWorkspace="bkg",
-                )
-
-                if mtd.doesExist("sa_mask"):
-                    MaskDetectors(Workspace="bkg", MaskedWorkspace="sa_mask")
+                if mtd.doesExist("sa"):
+                    MaskDetectors(Workspace="bkg", MaskedWorkspace="sa")
 
                 if mtd.doesExist("mask"):
                     MaskDetectors(Workspace="bkg", MaskedWorkspace="mask")
@@ -1882,16 +1968,78 @@ class LaueData(BaseDataModel):
                         InputWorkspace="bkg", OutputWorkspace="bkg"
                     )
 
-            pc = mtd["bkg"].run().getProperty("gd_prtn_chrg").value
+            pc_bkg = mtd["bkg"].run().getProperty("gd_prtn_chrg").value
+            pc_sig = mtd[event_name].run().getProperty("gd_prtn_chrg").value
 
             CreateSingleValuedWorkspace(
-                DataValue=pc, OutputWorkspace="pc_scale"
+                DataValue=pc_bkg, OutputWorkspace="pc_scale"
             )
 
             Multiply(
                 LHSWorkspace="bkg",
                 RHSWorkspace="pc_scale",
                 OutputWorkspace="bkg",
+            )
+
+            ConvertUnits(
+                InputWorkspace="bkg",
+                OutputWorkspace="bkg",
+                Target="Wavelength",
+            )
+
+            ConvertUnits(
+                InputWorkspace=event_name,
+                OutputWorkspace=event_name,
+                Target="Wavelength",
+            )
+
+            GroupDetectors(
+                InputWorkspace="bkg",
+                OutputWorkspace="bkg_group",
+                CopyGroupingFromWorkspace="group",
+            )
+
+            GroupDetectors(
+                InputWorkspace=event_name,
+                OutputWorkspace=event_name + "_group",
+                CopyGroupingFromWorkspace="group",
+            )
+
+            params = [
+                2 * np.pi / self.k_max,
+                (2 * np.pi / self.k_max - 2 * np.pi / self.k_min) / 500,
+                2 * np.pi / self.k_min,
+            ]
+
+            Rebin(
+                InputWorkspace="bkg_group",
+                OutputWorkspace="bkg_group",
+                Params=params,
+                PreserveEvents=False,
+            )
+
+            Rebin(
+                InputWorkspace=event_name + "_group",
+                OutputWorkspace=event_name + "_group",
+                Params=params,
+                PreserveEvents=False,
+            )
+
+            y_bkg = mtd["bkg_group"].extractY() / pc_bkg
+            y_sig = mtd[event_name + "_group"].extractY() / pc_sig
+            r = y_sig / y_bkg
+            r[~np.isfinite(r)] = np.nan
+
+            c_bkg = np.nanmedian(r, axis=1)
+
+            for i in range(c_bkg.shape[0]):
+                mtd["bkg_group"].setY(i, np.full(y_bkg.shape[1], c_bkg[i]))
+
+            Multiply(
+                LHSWorkspace="bkg",
+                RHSWorkspace="bkg_group",
+                OutputWorkspace="bkg",
+                AllowDifferentNumberSpectra=True,
             )
 
             self.convert_to_Q_lab("bkg", "bkg_md")

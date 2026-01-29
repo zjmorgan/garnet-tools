@@ -38,7 +38,7 @@ from garnet.reduction.parallel import ParallelProcessor
 INTEGRATION = os.path.abspath(__file__)
 directory = os.path.dirname(INTEGRATION)
 
-filename = os.path.join(directory, "../utilities/reflections.py")
+filename = os.path.join(directory, "../utilities/structure.py")
 REFLECTIONS = os.path.abspath(filename)
 
 assert os.path.exists(REFLECTIONS)
@@ -138,6 +138,8 @@ class Integration(SubPlan):
             os.remove(file)
             os.remove(os.path.splitext(file)[0] + ".mat")
 
+        peaks.reset_satellites("combine")
+
         if mtd.doesExist("combine"):
             peaks.save_peaks(result_file, "combine")
 
@@ -168,7 +170,7 @@ class Integration(SubPlan):
 
     def write(self, result_file):
         process = subprocess.Popen(
-            ["python", REFLECTIONS, result_file],
+            ["python", REFLECTIONS, self.plan["YAML"]],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -181,8 +183,6 @@ class Integration(SubPlan):
 
         data = DataModel(beamlines[self.plan["Instrument"]])
         data.update_raw_path(self.plan)
-
-        # data.combine_files(self.plan["IPTS"], self.plan["ProcessMap"])
 
         peaks = PeaksModel()
 
@@ -743,7 +743,7 @@ class Integration(SubPlan):
             print(traceback.format_exc())
             return key, value
 
-        print(self.status + " 2/2 {:}/{:}".format(key, self.total))
+        print(self.status + " 2/2 {:}".format(hkl))
 
         if params is not None:
             c, S, *best_fit = ellipsoid.best_fit

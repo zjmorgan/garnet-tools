@@ -12,6 +12,7 @@ from garnet.plots.base import Pages
 from garnet.plots.volume import SlicePlot
 from garnet.reduction.data import DataModel
 from garnet.reduction.plan import SubPlan
+from garnet.reduction.sample import SampleMaterial
 from garnet.reduction.crystallography import space_point, point_laue
 from garnet.config.instruments import beamlines
 
@@ -131,6 +132,10 @@ class Normalization(SubPlan):
         self.run = 0
         self.runs = len(runs)
 
+        output_file = self.get_output_file()
+
+        # sm = SampleMaterial(self.plan, output_file)
+
         for run in runs:
             self.run += 1
 
@@ -161,11 +166,18 @@ class Normalization(SubPlan):
 
             data.crop_for_normalization("data")
 
-            data.load_background(self.plan.get("BackgroundFile"), "data")
+            data.load_background(
+                self.plan.get("BackgroundFile"),
+                "data",
+                self.plan.get("DetectorCalibration"),
+                self.plan.get("TubeCalibration"),
+            )
 
             data.group_pixels("data")
 
             data.load_clear_UB(self.plan["UBFile"], "data", run)
+
+            # data.absorption_correction("data", *sm.get_sample_material())
 
             data.convert_to_Q_sample("data", "md", lorentz_corr=False)
 
@@ -176,8 +188,6 @@ class Normalization(SubPlan):
                 self.params["Bins"],
                 symmetry=self.params.get("Symmetry"),
             )
-
-        output_file = self.get_output_file()
 
         UB_file = output_file.replace(".nxs", ".mat")
         data.save_UB(UB_file, "md")
@@ -420,8 +430,11 @@ class Normalization(SubPlan):
 
         for ind, file in enumerate(files):
             UB_file = file.replace(".nxs", ".mat")
-
-            os.remove(UB_file)
+            if os.path.exists(UB_file):
+                os.remove(UB_file)
+            STL_file = file.replace(".nxs", ".stl")
+            if os.path.exists(STL_file):
+                os.remove(STL_file)
 
         data.save_histograms(data_file, "data", sample_logs=True)
         data.save_histograms(norm_file, "norm", sample_logs=True)

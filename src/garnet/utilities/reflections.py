@@ -873,34 +873,56 @@ class Peaks:
         filename = os.path.splitext(self.filename)[0]
 
         with PdfPages(filename + "_cont.pdf") as pdf:
-            fig, ax = plt.subplots(3, 1, sharex=True, sharey=True)
+            fig, ax = plt.subplots(4, 1, sharex=True, sharey=True)
 
-            ax[0].scatter(Q0_mod, peak_err[:, 0], c=wl, s=1)
-            ax[1].scatter(Q0_mod, peak_err[:, 1], c=wl, s=1)
-            ax[2].scatter(Q0_mod, peak_err[:, 2], c=wl, s=1)
+            ax[0].scatter(
+                Q0_mod, peak_err[:, 0], c=wl, s=0.05, rasterized=True
+            )
+            ax[1].scatter(
+                Q0_mod, peak_err[:, 1], c=wl, s=0.05, rasterized=True
+            )
+            ax[2].scatter(
+                Q0_mod, peak_err[:, 2], c=wl, s=0.05, rasterized=True
+            )
+            ax[3].scatter(
+                Q0_mod,
+                np.linalg.norm(peak_err, axis=1),
+                c=wl,
+                s=0.05,
+                rasterized=True,
+            )
             ax[0].minorticks_on()
-            ax[2].set_xlabel(r"$Q$ [$\AA^{-1}$]")
+            ax[3].set_xlabel(r"$Q$ [$\AA^{-1}$]")
             ax[0].set_ylabel(r"$\Delta{Q}_1$ [$\AA^{-1}$]")
             ax[1].set_ylabel(r"$\Delta{Q}_2$ [$\AA^{-1}$]")
             ax[2].set_ylabel(r"$\Delta{Q}_3$ [$\AA^{-1}$]")
+            ax[2].set_ylabel(r"$|\Delta{Q}|$ [$\AA^{-1}$]")
 
-            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
             plt.close("all")
 
-            fig, ax = plt.subplots(3, 1, sharex=True, sharey=True)
+            fig, ax = plt.subplots(4, 1, sharex=True, sharey=True)
 
-            ax[0].scatter(Q0_mod, Q_rad[:, 0], c="C0", s=1)
-            ax[1].scatter(Q0_mod, Q_rad[:, 1], c="C1", s=1)
-            ax[2].scatter(Q0_mod, Q_rad[:, 2], c="C2", s=1)
+            ax[0].scatter(Q0_mod, Q_rad[:, 0], c="C0", s=0.05, rasterized=True)
+            ax[1].scatter(Q0_mod, Q_rad[:, 1], c="C1", s=0.05, rasterized=True)
+            ax[2].scatter(Q0_mod, Q_rad[:, 2], c="C2", s=0.05, rasterized=True)
+            ax[3].scatter(
+                Q0_mod,
+                np.cbrt(np.prod(Q_rad, axis=1)),
+                c="C3",
+                s=0.05,
+                rasterized=True,
+            )
 
             ax[0].minorticks_on()
-            ax[2].set_xlabel(r"$Q$ [$\AA^{-1}$]")
+            ax[3].set_xlabel(r"$Q$ [$\AA^{-1}$]")
             ax[0].set_ylabel(r"$r_1$ [$\AA^{-1}$]")
             ax[1].set_ylabel(r"$r_2$ [$\AA^{-1}$]")
             ax[2].set_ylabel(r"$r_3$ [$\AA^{-1}$]")
+            ax[3].set_ylabel(r"$r$ [$\AA^{-1}$]")
 
-            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
             plt.close("all")
 
@@ -910,7 +932,11 @@ class Peaks:
 
             for i in range(3):
                 ax[i].scatter(
-                    Q_rad[sort, i], peak_err[sort, i], c=Q0_mod[sort], s=0.1
+                    Q_rad[sort, i],
+                    peak_err[sort, i],
+                    c=Q0_mod[sort],
+                    s=0.05,
+                    rasterized=True,
                 )
                 ax[i].set_aspect(1)
                 ax[i].minorticks_on()
@@ -918,50 +944,50 @@ class Peaks:
 
             ax[0].set_ylabel(r"$\Delta{Q}_i$ [$\AA^{-1}$]")
 
-            for i in range(3):
-                X = np.column_stack([Q_rad[sort, i], peak_err[sort, i]])
-                mcd = MinCovDet().fit(X)
+            # for i in range(3):
+            #     X = np.column_stack([Q_rad[sort, i], peak_err[sort, i]])
+            #     mcd = MinCovDet().fit(X)
 
-                cov = mcd.covariance_
-                pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
+            #     cov = mcd.covariance_
+            #     pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
 
-                eps = 1e-6
-                if abs(pearson) > 1 - eps:
-                    pearson = np.clip(pearson, -1, 1)
-                    angle = 0.5 * np.pi if pearson > 0 else -0.5 * np.pi
-                else:
-                    angle = np.arctan(
-                        2.0 * pearson * cov[0, 1] / (cov[0, 0] - cov[1, 1])
-                    )
+            #     eps = 1e-6
+            #     if abs(pearson) > 1 - eps:
+            #         pearson = np.clip(pearson, -1, 1)
+            #         angle = 0.5 * np.pi if pearson > 0 else -0.5 * np.pi
+            #     else:
+            #         angle = np.arctan(
+            #             2.0 * pearson * cov[0, 1] / (cov[0, 0] - cov[1, 1])
+            #         )
 
-                n_std = np.sqrt(scipy.stats.chi2.ppf(0.999, df=2))
-                scale_x = np.sqrt(cov[0, 0]) * n_std
-                scale_y = np.sqrt(cov[1, 1]) * n_std
+            #     n_std = np.sqrt(scipy.stats.chi2.ppf(0.999, df=2))
+            #     scale_x = np.sqrt(cov[0, 0]) * n_std
+            #     scale_y = np.sqrt(cov[1, 1]) * n_std
 
-                mean_x, mean_y = mcd.location_
+            #     mean_x, mean_y = mcd.location_
 
-                trans = (
-                    Affine2D()
-                    .rotate_deg(angle * 180 / np.pi)
-                    .scale(scale_x, scale_y)
-                    .translate(mean_x, mean_y)
-                )
+            #     trans = (
+            #         Affine2D()
+            #         .rotate_deg(angle * 180 / np.pi)
+            #         .scale(scale_x, scale_y)
+            #         .translate(mean_x, mean_y)
+            #     )
 
-                ellipse = Ellipse(
-                    (0, 0), width=1, height=1, facecolor="none", edgecolor="k"
-                )
-                ellipse.set_transform(trans + ax[i].transData)
-                ax[i].add_patch(ellipse)
+            #     ellipse = Ellipse(
+            #         (0, 0), width=1, height=1, facecolor="none", edgecolor="k"
+            #     )
+            #     ellipse.set_transform(trans + ax[i].transData)
+            #     ax[i].add_patch(ellipse)
 
-                inv_cov = np.linalg.inv(cov)
-                for j, peak in enumerate(mtd[self.peaks]):
-                    x = Q_rad[j, i]
-                    y = peak_err[j, i]
-                    dx = [x - mean_x, y - mean_y]
-                    if inv_cov @ dx @ dx > n_std**2:
-                        peak.setSigmaIntensity(float("-inf"))
+            #     inv_cov = np.linalg.inv(cov)
+            #     for j, peak in enumerate(mtd[self.peaks]):
+            #         x = Q_rad[j, i]
+            #         y = peak_err[j, i]
+            #         dx = [x - mean_x, y - mean_y]
+            #         if inv_cov @ dx @ dx > n_std**2:
+            #             peak.setSigmaIntensity(float("-inf"))
 
-            pdf.savefig(fig, dpi=100, bbox_inches=None)
+            pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
             plt.close("all")
 
@@ -997,6 +1023,10 @@ class Peaks:
             OutputWorkspace="spectrum",
             InstrumentName=instrument,
         )
+
+    def get_cell(self):
+        ol = mtd[self.peaks].sample().getOrientedLattice()
+        return ol.a(), ol.b(), ol.c(), ol.alpha(), ol.beta(), ol.gamma()
 
     def load_peaks(self):
         LoadNexus(Filename=self.filename, OutputWorkspace=self.peaks)
@@ -1187,6 +1217,14 @@ class Peaks:
 
         self.reset_satellite()
 
+        if mtd.doesExist(self.peaks + "_merge"):
+            ol = mtd[self.peaks + "_merge"].sample().getOrientedLattice()
+            ol.setMaxOrder(self.max_order)
+            ol.setModVec1(self.mod_vec_1)
+            ol.setModVec2(self.mod_vec_2)
+            ol.setModVec3(self.mod_vec_3)
+            ol.setModUB(self.modUB)
+
         FilterPeaks(
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
@@ -1319,20 +1357,13 @@ class Peaks:
             peak.setIntensity(raw_intens / L / corr)
             peak.setSigmaIntensity(raw_sig / L / corr)
 
-    def merge_intensities(self, name=None, fit_dict=None):
+    def merge_intensities(self, name=None):
         if name is not None:
             peaks = name
             app = "_{}".format(name).replace(" ", "_")
         else:
             peaks = self.peaks
             app = ""
-
-        CopySample(
-            InputWorkspace=peaks,
-            OutputWorkspace=peaks + "_merge",
-            CopyName=False,
-            CopyEnvironment=False,
-        )
 
         filename = os.path.splitext(self.filename)[0] + app + "_merge"
 
@@ -1360,10 +1391,12 @@ class Peaks:
             Format="Fullprof",
         )
 
-    def reset_satellite(self):
+    def reset_satellite(self, peaks=None):
         mod_mnp = []
         mod_hkl = []
-        for peak in mtd[self.peaks]:
+        if peaks is None:
+            peaks = self.peaks
+        for peak in mtd[peaks]:
             hkl = peak.getHKL()
             int_hkl = peak.getIntHKL()
             int_mnp = peak.getIntMNP()
@@ -1371,14 +1404,17 @@ class Peaks:
                 mod_mnp.append(np.array(int_mnp))
                 mod_hkl.append(np.array(hkl - int_hkl))
 
-        ol = mtd[self.peaks].sample().getOrientedLattice()
+        ol = mtd[peaks].sample().getOrientedLattice()
 
         if len(mod_mnp) > 0:
             mod_vec = np.linalg.pinv(mod_mnp) @ np.array(mod_hkl)
 
-            ol.setModVec1(V3D(*mod_vec[0]))
-            ol.setModVec2(V3D(*mod_vec[1]))
-            ol.setModVec3(V3D(*mod_vec[2]))
+            self.mod_vec_1 = V3D(*mod_vec[0])
+            self.mod_vec_2 = V3D(*mod_vec[1])
+            self.mod_vec_3 = V3D(*mod_vec[2])
+            ol.setModVec1(self.mod_vec_1)
+            ol.setModVec2(self.mod_vec_2)
+            ol.setModVec3(self.mod_vec_3)
 
             ol.setModUB(ol.getUB() @ ol.getModHKL())
 
@@ -1394,12 +1430,15 @@ class Peaks:
             self.max_order = 0
             self.modUB = np.zeros((3, 3))
             self.modHKL = np.zeros((3, 3))
+            self.mod_vec_1 = V3D(0, 0, 0)
+            self.mod_vec_2 = V3D(0, 0, 0)
+            self.mod_vec_3 = V3D(0, 0, 0)
 
-            ol.setMaxOrder(0)
+            ol.setMaxOrder(self.max_order)
 
-            ol.setModVec1(V3D(0, 0, 0))
-            ol.setModVec2(V3D(0, 0, 0))
-            ol.setModVec3(V3D(0, 0, 0))
+            ol.setModVec1(self.mod_vec_1)
+            ol.setModVec2(self.mod_vec_2)
+            ol.setModVec3(self.mod_vec_3)
 
             ol.setModUB(self.modUB)
 
@@ -1416,7 +1455,7 @@ class Peaks:
         filename = os.path.splitext(self.filename)[0] + app
 
         if mtd.doesExist(self.peaks + "_merge"):
-            self.merge_intensities(name)
+            self.merge_intensities(self.peaks)
 
         SortPeaksWorkspace(
             InputWorkspace=peaks,

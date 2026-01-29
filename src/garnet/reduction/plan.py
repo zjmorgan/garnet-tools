@@ -405,6 +405,8 @@ class ReductionPlan:
         else:
             self.plan["Runs"] = [int(runs)]
 
+        self.plan["YAML"] = filename
+
     def save_plan(self, filename, set_output=True):
         """
         Save a data reduction plan.

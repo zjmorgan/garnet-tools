@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -5,21 +6,27 @@ import numpy as np
 from garnet.utilities.reflections import AbsorptionCorrection, Peaks
 from garnet.utilities.refinement import NuclearStructureRefinement
 
-from garnet.reduction.plan import load_YAML, save_YAML
+from garnet.reduction.plan import ReductionPlan
 from garnet.reduction.crystallography import space_groups, space_point
 from garnet.reduction.integration import Integration
 
 
 class StructureAnalysis:
-    def __init__(self, config):
+    def __init__(self, config, filename):
         defaults = {
-            "Filename": None,
-            "ExtinctionModel": "Type II",
-            "RefineAbsorption": False,
+            "ExtinctionModel": "SHELX",
             "ChemicalFormula": "Yb3-Al5-O12",
+            "ZParameter": 8,
+            "UVector": [0, 0, 1],
+            "VVector": [1, 0, 0],
+            "ThicknessWidthHeight": [0, 0, 0],
         }
 
         defaults.update(config)
+
+        assert os.path.exists(filename)
+
+        self.filename = filename
 
         space_group = defaults.get("SpaceGroup")
         point_group = None
@@ -31,20 +38,44 @@ class StructureAnalysis:
         self.point_group = point_group
 
         self.sites = defaults.get("Sites")
+        self.ext_model = defaults.get("ExtinctionModel")
 
-        self.refine_abs = defaults.get("RefineAbsorption")
+        self.refine_abs = False
+        if self.space_group is not None and self.sites is not None:
+            self.refine_abs = True
 
-        if self.refine_abs:
-            assert self.space_group is not None
-            assert self.sites is not None
+        self.chemical_formula = defaults.get("ChemicalFormula")
+        self.z = defaults.get("ZParameter")
+        self.uvector = defaults.get("UVector")
+        self.vvector = defaults.get("VVector")
+
+        parameters = defaults.get("ThicknessWidthHeight")
+        if type(parameters) is not list:
+            parameters = [parameters] * 3
+        self.parameters = parameters
 
         self.load_peaks()
-        self.refimenent()
+
+        apply_corr = False
+        if not self.refine_abs:
+            apply_corr = (np.array(self.parameters) > 0).all()
+
+        if apply_corr:
+            self.apply_correction()
+
+        if self.sites is not None and self.space_group is not None:
+            self.refimenent()
+            self.load_peaks()
+
+            if self.refine_abs:
+                self.apply_correction()
+
         self.save_peaks()
 
     def load_peaks(self):
         self.peaks = Peaks("peaks", self.filename, None, self.point_group)
         self.peaks.load_peaks()
+        self.cell = self.peaks.get_cell()
 
     def save_peaks(self):
         self.peaks.save_peaks()
@@ -53,28 +84,42 @@ class StructureAnalysis:
         if (np.array(self.parameters) > 0).all():
             AbsorptionCorrection(
                 "peaks",
-                self.formula,
-                self.zparameter,
+                self.chemical_formula,
+                self.z,
                 u_vector=self.uvector,
                 v_vector=self.vvector,
                 params=self.parameters,
                 filename=self.filename,
             )
 
-    def refimenent(self):
+    def refimenent(self, n_iter=10):
         nuclear = NuclearStructureRefinement(
-            self.cell, self.space_group, self.sites, self.filename
+            self.cell,
+            self.space_group,
+            self.sites,
+            self.filename,
+            self.parameters,
         )
-        nuclear.refine(n_iter=10)
+        nuclear.extract_info()
+        nuclear.refine(
+            n_iter=n_iter, abs_corr=self.refine_abs, ext_model=self.ext_model
+        )
         nuclear.plot_result()
         nuclear.plot_sample_shape()
         nuclear.save_corrected_peaks()
+
+        self.uvector = nuclear.uvector
+        self.vvector = nuclear.vvector
+        self.parameters = nuclear.parameters
+        self.chemical_formula, self.z = nuclear.chemical_formula_z_parameter()
 
 
 if __name__ == "__main__":
     filename = sys.argv[1]
 
-    params = load_YAML(filename)
+    rp = ReductionPlan()
+    rp.load_plan(filename)
+    params = rp.plan
 
     config = {}
     if params.get("Sample") is not None:
@@ -85,6 +130,5 @@ if __name__ == "__main__":
         config.update(params["Integration"])
 
     inst = Integration(params)
-    config["Filename"] = inst.get_file()
 
-    StructureAnalysis(config)
+    StructureAnalysis(config, inst.get_file(inst.get_output_file(), ""))
