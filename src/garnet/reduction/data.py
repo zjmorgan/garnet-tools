@@ -1981,66 +1981,66 @@ class LaueData(BaseDataModel):
                 OutputWorkspace="bkg",
             )
 
-            ConvertUnits(
-                InputWorkspace="bkg",
-                OutputWorkspace="bkg",
-                Target="Wavelength",
-            )
+            # ConvertUnits(
+            #     InputWorkspace="bkg",
+            #     OutputWorkspace="bkg",
+            #     Target="Wavelength",
+            # )
 
-            ConvertUnits(
-                InputWorkspace=event_name,
-                OutputWorkspace=event_name,
-                Target="Wavelength",
-            )
+            # ConvertUnits(
+            #     InputWorkspace=event_name,
+            #     OutputWorkspace=event_name,
+            #     Target="Wavelength",
+            # )
 
-            GroupDetectors(
-                InputWorkspace="bkg",
-                OutputWorkspace="bkg_group",
-                CopyGroupingFromWorkspace="group",
-            )
+            # GroupDetectors(
+            #     InputWorkspace="bkg",
+            #     OutputWorkspace="bkg_group",
+            #     CopyGroupingFromWorkspace="group",
+            # )
 
-            GroupDetectors(
-                InputWorkspace=event_name,
-                OutputWorkspace=event_name + "_group",
-                CopyGroupingFromWorkspace="group",
-            )
+            # GroupDetectors(
+            #     InputWorkspace=event_name,
+            #     OutputWorkspace=event_name + "_group",
+            #     CopyGroupingFromWorkspace="group",
+            # )
 
-            params = [
-                2 * np.pi / self.k_max,
-                (2 * np.pi / self.k_max - 2 * np.pi / self.k_min) / 500,
-                2 * np.pi / self.k_min,
-            ]
+            # params = [
+            #     2 * np.pi / self.k_max,
+            #     (2 * np.pi / self.k_max - 2 * np.pi / self.k_min) / 500,
+            #     2 * np.pi / self.k_min,
+            # ]
 
-            Rebin(
-                InputWorkspace="bkg_group",
-                OutputWorkspace="bkg_group",
-                Params=params,
-                PreserveEvents=False,
-            )
+            # Rebin(
+            #     InputWorkspace="bkg_group",
+            #     OutputWorkspace="bkg_group",
+            #     Params=params,
+            #     PreserveEvents=False,
+            # )
 
-            Rebin(
-                InputWorkspace=event_name + "_group",
-                OutputWorkspace=event_name + "_group",
-                Params=params,
-                PreserveEvents=False,
-            )
+            # Rebin(
+            #     InputWorkspace=event_name + "_group",
+            #     OutputWorkspace=event_name + "_group",
+            #     Params=params,
+            #     PreserveEvents=False,
+            # )
 
-            y_bkg = mtd["bkg_group"].extractY() / pc_bkg
-            y_sig = mtd[event_name + "_group"].extractY() / pc_sig
-            r = y_sig / y_bkg
-            r[~np.isfinite(r)] = np.nan
+            # y_bkg = mtd["bkg_group"].extractY() / pc_bkg
+            # y_sig = mtd[event_name + "_group"].extractY() / pc_sig
+            # r = y_sig / y_bkg
+            # r[~np.isfinite(r)] = np.nan
 
-            c_bkg = np.nanmedian(r, axis=1)
+            # c_bkg = np.nanmedian(r, axis=1)
 
-            for i in range(c_bkg.shape[0]):
-                mtd["bkg_group"].setY(i, np.full(y_bkg.shape[1], c_bkg[i]))
+            # for i in range(c_bkg.shape[0]):
+            #     mtd["bkg_group"].setY(i, np.full(y_bkg.shape[1], c_bkg[i]))
 
-            Multiply(
-                LHSWorkspace="bkg",
-                RHSWorkspace="bkg_group",
-                OutputWorkspace="bkg",
-                AllowDifferentNumberSpectra=True,
-            )
+            # Multiply(
+            #     LHSWorkspace="bkg",
+            #     RHSWorkspace="bkg_group",
+            #     OutputWorkspace="bkg",
+            #     AllowDifferentNumberSpectra=True,
+            # )
 
             self.convert_to_Q_lab("bkg", "bkg_md")
 
