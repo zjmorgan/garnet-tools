@@ -558,10 +558,12 @@ class NuclearStructureRefinement:
         )
 
         self.banks, self.detectors = np.unique(
-            bank, return_inverse=True, axis=0
+            np.array(bank)[mask], return_inverse=True, axis=0
         )
 
-        self.runs, self.angles = np.unique(run, return_inverse=True, axis=0)
+        self.runs, self.angles = np.unique(
+            np.array(run)[mask], return_inverse=True, axis=0
+        )
 
         self.I_obs = np.array(intensity)[mask] * scale_factor
         self.sig = np.array(sigma)[mask] * scale_factor

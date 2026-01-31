@@ -459,8 +459,8 @@ class Parametrization(SubPlan):
                 os.remove(data_file)
                 os.remove(norm_file)
 
-                bkg_data_file = self.get_file(file, "bkg_data")
-                bkg_norm_file = self.get_file(file, "bkg_norm")
+            bkg_data_file = self.get_file(file, "bkg_data")
+            bkg_norm_file = self.get_file(file, "bkg_norm")
 
             if os.path.exists(bkg_data_file) and os.path.exists(bkg_norm_file):
                 data.load_histograms(bkg_data_file, "tmp_bkg_data")
