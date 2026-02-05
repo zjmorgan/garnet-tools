@@ -47,9 +47,12 @@ class FormView(QWidget):
         layout = QVBoxLayout()
         load_save_layout = QHBoxLayout()
 
-        plan = self.init_plan()
+        exp_tab = self.init_plan()
 
-        layout.addLayout(plan)
+        setup_widget = QTabWidget(self)
+        setup_widget.addTab(exp_tab, "Instrument/Experiment")
+
+        layout.addWidget(setup_widget)
 
         norm_tab = self.norm_plan()
         param_tab = self.param_plan()
@@ -1115,6 +1118,8 @@ class FormView(QWidget):
             return float(s)
 
     def init_plan(self):
+        tab = QWidget()
+
         layout = QVBoxLayout()
 
         experiment_params_layout = QHBoxLayout()
@@ -1229,7 +1234,9 @@ class FormView(QWidget):
         layout.addLayout(run_params_layout)
         layout.addLayout(instrument_params_layout)
 
-        return layout
+        tab.setLayout(layout)
+
+        return tab
 
     def run_command(self, command):
         self.output.appendPlainText("Running shell command...\n")

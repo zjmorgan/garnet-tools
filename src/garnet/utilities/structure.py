@@ -98,7 +98,7 @@ class StructureAnalysis:
                 filename=self.filename,
             )
 
-    def refimenent(self, n_iter=10):
+    def refimenent(self, n_iter=20):
         nuclear = NuclearStructureRefinement(
             self.cell,
             self.space_group,

@@ -12,7 +12,8 @@ from garnet.plots.base import Pages
 from garnet.plots.volume import SlicePlot
 from garnet.reduction.data import DataModel
 from garnet.reduction.plan import SubPlan
-from garnet.reduction.sample import SampleMaterial
+
+# from garnet.reduction.sample import SampleMaterial
 from garnet.reduction.crystallography import space_point, point_laue
 from garnet.config.instruments import beamlines
 

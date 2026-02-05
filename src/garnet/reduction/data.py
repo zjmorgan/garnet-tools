@@ -1948,8 +1948,8 @@ class LaueData(BaseDataModel):
                     OutputWorkspace="bkg",
                 )
 
-                # if self.grouping is not None:
-                #     self.group_pixels("bkg")
+                if self.grouping is not None:
+                    self.group_pixels("bkg")
 
                 Rebin(
                     InputWorkspace="bkg",
@@ -1957,19 +1957,13 @@ class LaueData(BaseDataModel):
                     OutputWorkspace="bkg",
                 )
 
-                if mtd.doesExist("sa"):
-                    MaskDetectors(Workspace="bkg", MaskedWorkspace="sa")
-
-                if mtd.doesExist("mask"):
-                    MaskDetectors(Workspace="bkg", MaskedWorkspace="mask")
-
                 if not mtd["bkg"].run().hasProperty("NormalizationFactor"):
                     NormaliseByCurrent(
                         InputWorkspace="bkg", OutputWorkspace="bkg"
                     )
 
             pc_bkg = mtd["bkg"].run().getProperty("gd_prtn_chrg").value
-            pc_sig = mtd[event_name].run().getProperty("gd_prtn_chrg").value
+            # pc_sig = mtd[event_name].run().getProperty("gd_prtn_chrg").value
 
             CreateSingleValuedWorkspace(
                 DataValue=pc_bkg, OutputWorkspace="pc_scale"

@@ -866,6 +866,16 @@ class Peaks:
         Q_vol = np.array(Q_vol)
         Q_rad = np.array(Q_rad)
 
+        mod_peak_err = np.linalg.norm(peak_err, axis=1)
+
+        med_peak_err = np.median(peak_err, axis=0)
+        mad_peak_err = np.median(np.abs(peak_err - med_peak_err), axis=0)
+
+        mask = [
+            np.abs(peak_err[:, i] - med_peak_err[i]) / mad_peak_err[i] < 4.5
+            for i in range(3)
+        ]
+
         wl = np.array(wl)
         tt = np.array(tt)
 
@@ -874,28 +884,39 @@ class Peaks:
         with PdfPages(filename + "_cont.pdf") as pdf:
             fig, ax = plt.subplots(4, 1, sharex=True, sharey=True)
 
-            ax[0].scatter(
-                Q0_mod, peak_err[:, 0], c=wl, s=0.05, rasterized=True
-            )
-            ax[1].scatter(
-                Q0_mod, peak_err[:, 1], c=wl, s=0.05, rasterized=True
-            )
-            ax[2].scatter(
-                Q0_mod, peak_err[:, 2], c=wl, s=0.05, rasterized=True
-            )
+            for i in range(3):
+                ax[i].scatter(
+                    Q0_mod, peak_err[:, i], c=wl, s=0.05, rasterized=True
+                )
+
+                ax[i].axhline(
+                    med_peak_err[i] + 4.5 * mad_peak_err[i],
+                    color="k",
+                    lw=1,
+                    zorder=-1,
+                )
+
+                ax[i].axhline(
+                    med_peak_err[i] - 4.5 * mad_peak_err[i],
+                    color="k",
+                    lw=1,
+                    zorder=-1,
+                )
+
             ax[3].scatter(
                 Q0_mod,
-                np.linalg.norm(peak_err, axis=1),
+                mod_peak_err,
                 c=wl,
                 s=0.05,
                 rasterized=True,
             )
+
             ax[0].minorticks_on()
             ax[3].set_xlabel(r"$Q$ [$\AA^{-1}$]")
             ax[0].set_ylabel(r"$\Delta{Q}_1$ [$\AA^{-1}$]")
             ax[1].set_ylabel(r"$\Delta{Q}_2$ [$\AA^{-1}$]")
             ax[2].set_ylabel(r"$\Delta{Q}_3$ [$\AA^{-1}$]")
-            ax[2].set_ylabel(r"$|\Delta{Q}|$ [$\AA^{-1}$]")
+            ax[3].set_ylabel(r"$|\Delta{Q}|$ [$\AA^{-1}$]")
 
             pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
@@ -903,9 +924,15 @@ class Peaks:
 
             fig, ax = plt.subplots(4, 1, sharex=True, sharey=True)
 
-            ax[0].scatter(Q0_mod, Q_rad[:, 0], c="C0", s=0.05, rasterized=True)
-            ax[1].scatter(Q0_mod, Q_rad[:, 1], c="C1", s=0.05, rasterized=True)
-            ax[2].scatter(Q0_mod, Q_rad[:, 2], c="C2", s=0.05, rasterized=True)
+            for i in range(3):
+                ax[i].scatter(
+                    Q0_mod[mask[i]],
+                    Q_rad[:, i][mask[i]],
+                    c="C{}".format(i),
+                    s=0.05,
+                    rasterized=True,
+                )
+
             ax[3].scatter(
                 Q0_mod,
                 np.cbrt(np.prod(Q_rad, axis=1)),
@@ -931,9 +958,9 @@ class Peaks:
 
             for i in range(3):
                 ax[i].scatter(
-                    Q_rad[sort, i],
-                    peak_err[sort, i],
-                    c=Q0_mod[sort],
+                    Q_rad[sort, i][mask[i][sort]],
+                    peak_err[sort, i][mask[i][sort]],
+                    c=Q0_mod[sort][mask[i][sort]],
                     s=0.05,
                     rasterized=True,
                 )
@@ -985,6 +1012,11 @@ class Peaks:
             #         dx = [x - mean_x, y - mean_y]
             #         if inv_cov @ dx @ dx > n_std**2:
             #             peak.setSigmaIntensity(float("-inf"))
+
+            for i in range(3):
+                for j, peak in enumerate(mtd[self.peaks]):
+                    if not mask[i][j]:
+                        peak.setSigmaIntensity(float("-inf"))
 
             pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)

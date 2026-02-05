@@ -490,7 +490,8 @@ class NuclearStructureRefinement:
         return sites, param, scale, coeffs, dets, runs
 
     def load_hkls(self, filename):
-        LoadNexus(Filename=filename, OutputWorkspace="peaks")
+        if not mtd.doesExist("peaks"):
+            LoadNexus(Filename=filename, OutputWorkspace="peaks")
 
         self.extract_info()
 
@@ -603,7 +604,18 @@ class NuclearStructureRefinement:
         self.material = material.build()
 
     def calculate_structure_factors(self, params):
-        Fs = 0
+        Fs = self.calculate_structure_amplitudes(params)
+
+        return (Fs * Fs.conj())[self.inverse].real
+
+    def calculate_structure_amplitudes(self, params):
+        """
+        Compute complex structure amplitudes Fs (per unique hkl) for given `params`.
+
+        This is identical to the inner part of `calculate_structure_factors`
+        but returns the complex amplitudes (not squared magnitudes).
+        """
+        Fs = 0 + 0j
 
         for i, (site, transform, transform_disp, b) in enumerate(
             zip(self.sites, self.transforms, self.transforms_disp, self.bs)
@@ -647,7 +659,7 @@ class NuclearStructureRefinement:
 
             Fs += np.sum(b * occ * pf * T, axis=0)
 
-        return (Fs * Fs.conj())[self.inverse].real
+        return Fs
 
     def chemical_formula_z_parameter(self):
         sg = self.crystal_structure.getSpaceGroup()
@@ -818,6 +830,172 @@ class NuclearStructureRefinement:
             yx = 1 / np.sqrt(1 + xx)
             return yx
 
+    def extinction_jacobian(self, param, F2):
+        """
+        Analytical derivative dy/dparam for the extinction correction
+
+        Returns
+        -------
+        dy_dp : array
+            derivative of extinction factor y wrt `param` for each reflection
+        """
+        two_theta = self.two_theta
+        lamda = self.lamda
+        V = self.V
+
+        if self.model.lower() == "type ii":
+            # xp = k / V^2 * lamda^2 * r2 * F2
+            k = 1e2
+            xp = self.extinction_xp(param, F2, lamda, V)
+            # yp = 1 / (1 + c1 * xp**c2)
+            # dyp/dparam = - c1 * c2 * xp**(c2-1) * (dxp/dparam) / (1 + c1*xp**c2)**2
+            dxp_dp = k / V**2 * lamda**2 * F2
+            denom = (1 + self.c1 * xp**self.c2) ** 2
+            dy_dp = -self.c1 * self.c2 * (xp ** (self.c2 - 1)) * dxp_dp / denom
+            return dy_dp
+        elif self.model.lower().startswith("type ii"):
+            # xs = k / V^2 * lamda^3 * g / sin(two_theta) * Tbar * F2
+            k = 1e2
+            xs = self.extinction_xs(param, F2, two_theta, lamda, self.Tbar, V)
+            dxs_dp = (
+                k
+                / V**2
+                * lamda**3
+                * 1.0
+                / np.sin(two_theta)
+                * self.Tbar
+                * F2
+            )
+            denom = (1 + self.c1 * xs**self.c2) ** 2
+            dy_dp = -self.c1 * self.c2 * (xs ** (self.c2 - 1)) * dxs_dp / denom
+            return dy_dp
+        else:
+            # shelx: xx = k / V^2 * lamda^3 * x / sin(two_theta) * F2
+            k = 1e2
+            xx = self.extinction_xx(param, F2, two_theta, lamda, V)
+            dxx_dp = k / V**2 * lamda**3 / np.sin(two_theta) * F2
+            dy_dp = -0.5 * (1 + xx) ** (-1.5) * dxx_dp
+            return dy_dp
+
+    def absorption_jacobian_coeffs(self, coeffs, eps=1e-20):
+        """
+        Compute derivative of the absorption correction `T` wrt each coefficient in
+        `coeffs` using the complex-step method. Returns an array of shape
+        (n_coeffs, n_reflections) where each row is dT/dcoeff_i.
+
+        Complex-step is chosen because the analytic chain-rule through the
+        ellipsoid geometry and exit-length quadratic is tedious and error-prone;
+        this gives machine-precision derivatives for smooth code paths.
+        """
+        coeffs = np.asarray(coeffs, dtype=np.complex128)
+        n = coeffs.size
+        T_base = self.absorption_correction(coeffs.real)
+        jac = np.zeros((n, T_base.size), dtype=float)
+
+        for i in range(n):
+            pert = coeffs.copy()
+            pert[i] += 1j * eps
+            T_pert = self.absorption_correction(pert)
+            # derivative approx = imag(T_pert)/eps
+            jac[i, :] = np.imag(T_pert) / eps
+
+        return jac
+
+    def residuals_jacobian_wrt_parameters(self, params):
+        """
+        Build per-parameter derivatives of the residual vector for the
+        `objective_correction` residuals. Returns a dict mapping parameter
+        names to derivative arrays of length n_reflections.
+
+        This helper uses analytic formulas for extinction and scale/det/run
+        derivatives and complex-step for absorption coefficients.
+        """
+        # extract
+        sites, param, scale, coeffs, dets, runs = self.extract_parameters(
+            params
+        )
+
+        # precompute
+        F2s = self.F2s
+        y_abs = self.absorption_correction(coeffs)
+        y_ext = self.extinction_correction(param, F2s)
+        y = y_abs * y_ext
+        c = self.detector_bank_scale_factors(dets)
+        k = self.run_angle_scale_factors(runs)
+        sig = self.sig
+
+        # residual r = (scale * F2s * y * c * k - I_obs) / sig
+        common = (scale * F2s * c * k) / sig
+
+        jac = {}
+
+        # derivative wrt overall scale
+        jac["scale"] = (F2s * y * c * k) / sig
+
+        # derivative wrt extinction parameter
+        dy_dp_ext = self.extinction_jacobian(param, F2s)
+        jac["param"] = common * (y_abs * dy_dp_ext)
+
+        # derivative wrt absorption coeffs (use complex-step jacobian)
+        dT_dcoeffs = self.absorption_jacobian_coeffs(coeffs)
+        # map coefficient names to the same order used in `extract_parameters`
+        coeff_names = [
+            "alpha",
+            "beta",
+            "gamma",
+            "thickness",
+            "width",
+            "height",
+        ]
+        # d(y_abs)/dcoeff = dT/dcoeff ; dy/dcoeff = y_ext * dT/dcoeff
+        for i, cname in enumerate(coeff_names):
+            jac[f"coeff_{cname}"] = common * (y_ext * dT_dcoeffs[i, :])
+
+        # detector bank parameters: each param is applied per peak via self.detectors
+        # detectors array gives index per peak into the params array (0..n_banks-1)
+        n_banks = len(self.banks)
+        for j in range(n_banks):
+            mask = self.detectors == j
+            arr = np.zeros_like(self.I_obs, dtype=float)
+            arr[mask] = scale * F2s[mask] * y[mask] * k[mask] / sig[mask]
+            jac[f"det_{j}"] = arr
+
+        # run parameters similarly
+        n_runs = len(self.runs)
+        for j in range(n_runs):
+            mask = self.angles == j
+            arr = np.zeros_like(self.I_obs, dtype=float)
+            arr[mask] = scale * F2s[mask] * y[mask] * c[mask] / sig[mask]
+            jac[f"run_{j}"] = arr
+
+        return jac
+
+    def objective_correction_jac(self, params):
+        """
+        Jacobian for `objective_correction` compatible with lmfit/least_squares.
+
+        Returns a 2D array shaped (n_residuals, n_varying_parameters) ordered
+        according to `params` iteration order restricted to `par.vary==True`.
+        """
+        P = params
+        jac_map = self.residuals_jacobian_wrt_parameters(P)
+
+        # build column list in the same order lmfit will treat variables
+        var_names = [name for name, par in P.items() if par.vary]
+
+        n_res = self.I_obs.size
+        n_vars = len(var_names)
+        J = np.zeros((n_res, n_vars), dtype=float)
+
+        for j, name in enumerate(var_names):
+            if name in jac_map:
+                J[:, j] = jac_map[name]
+            else:
+                # parameter not handled explicitly -> zeros
+                J[:, j] = 0.0
+
+        return J
+
     def detector_bank_scale_factors(self, params):
         return params[self.detectors]
 
@@ -874,6 +1052,82 @@ class NuclearStructureRefinement:
         I_calc = F2s * self.y * c * k
 
         return (scale * I_calc - self.I_obs) / self.sig
+
+    def structure_jacobian(self, params, eps=1e-20):
+        """
+        Compute derivatives of residuals for `objective_structure` using
+        complex-step on the complex amplitudes Fs and chain-rule to d(F2).
+
+        Returns a dict mapping parameter names to derivative arrays.
+        """
+        sites, param, scale, coeffs, dets, runs = self.extract_parameters(
+            params
+        )
+
+        # precompute
+        Fs0 = self.calculate_structure_amplitudes(params)
+        # map unique -> peaks
+        F2s0 = (Fs0 * Fs0.conj())[self.inverse].real
+
+        c = self.detector_bank_scale_factors(dets)
+        k = self.run_angle_scale_factors(runs)
+        y = self.y
+        sig = self.sig
+
+        jac = {}
+
+        # helper: compute residual derivative factor for a change in F2 (per-peak)
+        def df2_to_dr(dF2_peaks):
+            return (scale * dF2_peaks * y * c * k) / sig
+
+        # scale param
+        jac["scale"] = (F2s0 * y * c * k) / sig
+
+        # find varying parameter names
+        var_names = [name for name, par in params.items() if par.vary]
+
+        for name in var_names:
+            if name == "scale":
+                continue
+            # perturb parameter using complex-step
+            pcopy = params.copy()
+            try:
+                pcopy[name].value = pcopy[name].value + 1j * eps
+            except Exception:
+                # cannot perturb (e.g., non-numeric) -> zero derivative
+                jac[name] = np.zeros_like(self.I_obs, dtype=float)
+                continue
+
+            Fs_pert = self.calculate_structure_amplitudes(pcopy)
+            dFs = np.imag(Fs_pert) / eps
+
+            # dF2_unique = 2 * Re(conj(Fs0) * dFs)
+            dF2_unique = 2.0 * np.real(np.conj(Fs0) * dFs)
+            dF2_peaks = dF2_unique[self.inverse]
+
+            jac[name] = df2_to_dr(dF2_peaks)
+
+        return jac
+
+    def objective_structure_jac(self, params):
+        """
+        Jacobian matrix for `objective_structure` matching lmfit param order.
+        """
+        jac_map = self.structure_jacobian(params)
+
+        var_names = [name for name, par in params.items() if par.vary]
+
+        n_res = self.I_obs.size
+        n_vars = len(var_names)
+        J = np.zeros((n_res, n_vars), dtype=float)
+
+        for j, name in enumerate(var_names):
+            if name in jac_map:
+                J[:, j] = jac_map[name]
+            else:
+                J[:, j] = 0.0
+
+        return J
 
     def objective_correction(self, params):
         """
@@ -939,7 +1193,12 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq", max_nfev=100)
+            result = out.minimize(
+                method="leastsq",
+                # Dfun=self.objective_structure_jac,
+                # col_deriv=False,
+                max_nfev=100,
+            )
 
             if report:
                 print(
@@ -971,7 +1230,12 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq", max_nfev=100)
+            result = out.minimize(
+                method="leastsq",
+                # Dfun=self.objective_correction_jac,
+                # col_deriv=False,
+                max_nfev=100,
+            )
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 2 (absorption)")
@@ -994,7 +1258,12 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq", max_nfev=100)
+            result = out.minimize(
+                method="leastsq",
+                Dfun=self.objective_correction_jac,
+                col_deriv=False,
+                max_nfev=100,
+            )
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 3 (extinction)")
@@ -1017,7 +1286,12 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq", max_nfev=100)
+            result = out.minimize(
+                method="leastsq",
+                Dfun=self.objective_correction_jac,
+                col_deriv=False,
+                max_nfev=100,
+            )
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 4 (calibration)")
@@ -1201,11 +1475,15 @@ class NuclearStructureRefinement:
             rasterized=True,
         )
         chemical_formula = self.chemical_formula.replace("-", " ")
+        Z = int(self.Z)
+
+        title = r"{} | {} | $R = {:.2f}\%$".format(chemical_formula, Z, R)
+
         ax.set_aspect(1)
         ax.minorticks_on()
         ax.set_xlim(*F_lim)
         ax.set_ylim(*F_lim)
-        ax.set_title(r"{} | $R = {:.2f}\%$".format(chemical_formula, R))
+        ax.set_title(title)
         ax.set_xlabel(r"$|F|_\mathrm{calc}$")
         ax.set_ylabel(r"$|F|_\mathrm{obs}$")
         fig.savefig(output + "_ref.pdf", bbox_inches="tight")
@@ -1422,7 +1700,7 @@ class NuclearStructureRefinement:
         self.Tbar = Tbar
         return self.T
 
-    def prepare_absorption_table(self, N=1000, seed=42, beta=3):
+    def prepare_absorption_table(self, N=100, seed=42, beta=3):
         rng = np.random.default_rng(seed)
 
         v = rng.normal(size=(N, 3))
