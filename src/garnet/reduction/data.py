@@ -18,6 +18,7 @@ from mantid.simpleapi import (
     PreprocessDetectorsToMD,
     ExtractMonitors,
     LoadMask,
+    ExtractMask,
     MaskDetectors,
     SetGoniometer,
     LoadSampleShape,
@@ -1583,7 +1584,7 @@ class LaueData(BaseDataModel):
             )
 
         if mtd.doesExist("sa"):
-            MaskDetectors(Workspace=event_name, MaskedWorkspace="sa")
+            MaskDetectors(Workspace=event_name, MaskedWorkspace="sa_mask")
 
         if mtd.doesExist("mask"):
             MaskDetectors(Workspace=event_name, MaskedWorkspace="mask")
@@ -1812,6 +1813,12 @@ class LaueData(BaseDataModel):
             #     self.group_pixels("sa")
 
             RemoveLogs(Workspace="sa")
+
+            ExtractMask(
+                InputWorkspace="sa",
+                UngroupDetectors=True,
+                OutputWorkspace="sa_mask"
+            )
 
         if not mtd.doesExist("flux"):
             LoadNexus(Filename=flux_file, OutputWorkspace="flux")
