@@ -3444,16 +3444,19 @@ class PeakEllipsoid:
             k = 1 / scipy.stats.norm.ppf(0.75)
             d_min, d_max = d_med - k * d_mad, d_med + k * d_max
 
-        shell = bkg & (n > 0) & (d >= d_min) & (d <= d_max)
+        shell = bkg & (n >= 0) & (d >= d_min) & (d <= d_max)
 
         d_pk = d[core].copy()
-        n_pk = n[core].copy()
-
         d_bkg = d[shell].copy()
-        n_bkg = n[shell].copy()
+
+        n_pk = n[pk].copy()
+        n_bkg = n[bkg].copy()
+
+        k_pk = kernel[pk]
+        k_bkg = kernel[bkg]
 
         bkg_cnts = np.nansum(d_bkg)
-        bkg_norm = np.nansum(n_bkg)
+        bkg_norm = np.nansum(n_bkg * k_bkg)
 
         if bkg_cnts == 0.0:
             bkg_cnts = float("nan")
@@ -3469,7 +3472,7 @@ class PeakEllipsoid:
             b_err = 0
 
         pk_cnts = np.nansum(d_pk)
-        pk_norm = np.nansum(n_pk)
+        pk_norm = np.nansum(n_pk * k_pk)
 
         if pk_cnts == 0.0:
             pk_cnts = float("nan")
@@ -3479,7 +3482,7 @@ class PeakEllipsoid:
         vol_pk = float(core.sum())
         vol_bkg = float(shell.sum())
 
-        vol = int(core.sum())
+        vol = k_pk.sum()
 
         ratio = vol_pk / vol_bkg if vol_bkg > 0 else 0
 
@@ -3500,7 +3503,7 @@ class PeakEllipsoid:
 
         return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
 
-    def fitted_profile(self, x0, x1, x2, d, n, c, S, p=0.997):
+    def fitted_profile(self, x0, x1, x2, d, n, kernel, c, S, p=0.997):
         scale = scipy.stats.chi2.ppf(p, df=1)
 
         c0, c1, c2 = c
@@ -3516,25 +3519,27 @@ class PeakEllipsoid:
 
         ellipsoid = np.einsum("ij,jklm,iklm->klm", S_inv, x, x)
 
-        C = S.copy()
-        C[0, 0] *= 2**2
+        structure = np.ones((3, 1, 1), dtype=bool)
 
-        S_inv = np.linalg.inv(C)
+        mask = (ellipsoid <= 1) 
 
-        profile = np.einsum("ij,jklm,iklm->klm", S_inv, x, x)
-
-        mask = (ellipsoid <= 1) | (profile <= 1)
+        for i in range(3):
+            mask = scipy.ndimage.binary_dilation(mask, structure=structure)
 
         d_int = d.copy()
         n_int = n.copy()
+        k_int = kernel.copy()
 
-        n_int[n == 0] = np.nan
+        # n_int[n == 0] = np.nan
 
         d_int[~mask] = np.nan
         n_int[~mask] = np.nan
+        k_int[~mask] = np.nan
+
+        norm = dx1 * dx2 * np.nansum(k_int, axis=(1, 2))
 
         d_int = np.nansum(d_int, axis=(1, 2))
-        n_int = np.nanmean(n_int / dx1 / dx2, axis=(1, 2))
+        n_int = np.nansum(n_int * k_int, axis=(1, 2)) / norm
 
         x = x0[:, 0, 0] - c0
         y = d_int / n_int
@@ -3701,7 +3706,7 @@ class PeakEllipsoid:
 
         self.peak_background_mask = x0, x1, x2, pk, bkg
 
-        result = self.fitted_profile(x0, x1, x2, d, n, c, S)
+        result = self.fitted_profile(x0, x1, x2, d, n, kernel, c, S)
 
         I, I_err, b, b_err, x, y_fit, y, e = result
 
