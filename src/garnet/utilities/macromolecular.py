@@ -7,7 +7,7 @@ from mantid.simpleapi import mtd
 
 
 class Macromolecular:
-    def __init__(self, peaks):
+    def __init__(self, peaks="peaks"):
         self.peaks = peaks
 
         ol = mtd[self.peaks].sample().getOrientedLattice()

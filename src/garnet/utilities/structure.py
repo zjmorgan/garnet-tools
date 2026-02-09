@@ -11,10 +11,15 @@ import numpy as np
 
 from garnet.utilities.reflections import AbsorptionCorrection, Peaks
 from garnet.utilities.refinement import NuclearStructureRefinement
+from garnet.utilities.macromolecular import Macromolecular
 
 from garnet.reduction.plan import ReductionPlan
-from garnet.reduction.crystallography import space_groups, space_point
 from garnet.reduction.integration import Integration
+from garnet.reduction.crystallography import (
+    space_groups,
+    space_point,
+    mantid_to_gemmi,
+)
 
 
 class StructureAnalysis:
@@ -78,6 +83,18 @@ class StructureAnalysis:
 
         self.save_peaks()
 
+    def save_mtz(self):
+        if self.space_group is not None:
+            filename = os.path.splitext(self.filename)[0] + ".mtz"
+            sg = mantid_to_gemmi.get(self.space_group)
+            if sg is not None:
+                mm = Macromolecular("peaks")
+                mm.write_mtz(filename, space_group=sg)
+            else:
+                print("Invalid MTZ space group")
+        else:
+            print("Provide space group for MTZ")
+
     def load_peaks(self):
         self.peaks = Peaks("peaks", self.filename, None, self.point_group)
         self.peaks.load_peaks()
@@ -108,11 +125,14 @@ class StructureAnalysis:
         )
         nuclear.extract_info()
         nuclear.refine(
-            n_iter=n_iter, abs_corr=self.refine_abs, ext_model=self.ext_model
+            n_iter=n_iter,
+            abs_corr=self.refine_abs,
+            ext_model=self.ext_model,
+            det_corr=True,
+            run_corr=True,
         )
         nuclear.plot_result()
         nuclear.plot_sample_shape()
-        nuclear.save_corrected_peaks()
 
         self.uvector = nuclear.uvector
         self.vvector = nuclear.vvector

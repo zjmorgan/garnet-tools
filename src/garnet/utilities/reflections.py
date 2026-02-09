@@ -37,9 +37,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
 
-from matplotlib.patches import Ellipse
-from matplotlib.transforms import Affine2D
-
 np.random.seed(13)
 
 import scipy.optimize
@@ -47,7 +44,6 @@ import scipy.interpolate
 import scipy.stats
 
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.covariance import MinCovDet
 
 from mantid.kernel import V3D
 
@@ -62,7 +58,6 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import argparse
 
 from garnet.reduction.ub import Optimization
-from garnet.utilities.macromolecular import Macromolecular
 
 point_group_dict = {
     "-1": "-1 (Triclinic)",
@@ -969,49 +964,6 @@ class Peaks:
                 ax[i].set_xlabel(r"$r_{}$".format(i + 1) + " [$\AA^{-1}$]")
 
             ax[0].set_ylabel(r"$\Delta{Q}_i$ [$\AA^{-1}$]")
-
-            # for i in range(3):
-            #     X = np.column_stack([Q_rad[sort, i], peak_err[sort, i]])
-            #     mcd = MinCovDet().fit(X)
-
-            #     cov = mcd.covariance_
-            #     pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
-
-            #     eps = 1e-6
-            #     if abs(pearson) > 1 - eps:
-            #         pearson = np.clip(pearson, -1, 1)
-            #         angle = 0.5 * np.pi if pearson > 0 else -0.5 * np.pi
-            #     else:
-            #         angle = np.arctan(
-            #             2.0 * pearson * cov[0, 1] / (cov[0, 0] - cov[1, 1])
-            #         )
-
-            #     n_std = np.sqrt(scipy.stats.chi2.ppf(0.999, df=2))
-            #     scale_x = np.sqrt(cov[0, 0]) * n_std
-            #     scale_y = np.sqrt(cov[1, 1]) * n_std
-
-            #     mean_x, mean_y = mcd.location_
-
-            #     trans = (
-            #         Affine2D()
-            #         .rotate_deg(angle * 180 / np.pi)
-            #         .scale(scale_x, scale_y)
-            #         .translate(mean_x, mean_y)
-            #     )
-
-            #     ellipse = Ellipse(
-            #         (0, 0), width=1, height=1, facecolor="none", edgecolor="k"
-            #     )
-            #     ellipse.set_transform(trans + ax[i].transData)
-            #     ax[i].add_patch(ellipse)
-
-            #     inv_cov = np.linalg.inv(cov)
-            #     for j, peak in enumerate(mtd[self.peaks]):
-            #         x = Q_rad[j, i]
-            #         y = peak_err[j, i]
-            #         dx = [x - mean_x, y - mean_y]
-            #         if inv_cov @ dx @ dx > n_std**2:
-            #             peak.setSigmaIntensity(float("-inf"))
 
             for i in range(3):
                 for j, peak in enumerate(mtd[self.peaks]):

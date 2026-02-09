@@ -21,6 +21,7 @@ from lmfit import Minimizer, Parameters
 from mantid.simpleapi import (
     LoadNexus,
     SaveNexus,
+    CloneWorkspace,
     CreateSampleWorkspace,
     LoadSampleShape,
     mtd,
@@ -31,6 +32,8 @@ from mantid.geometry import (
     ReflectionConditionFilter,
 )
 from mantid.kernel import Atom, MaterialBuilder, V3D
+
+from garnet.plots.crystal import CrystalStructurePlot
 
 
 class NuclearStructureRefinement:
@@ -92,74 +95,152 @@ class NuclearStructureRefinement:
         val[np.isclose(val, 0)] = 0
         return val
 
-    def initialize_unit_cell_atoms(self, tol=1e-4):
-        null, x0, transforms, atms, js, bs = [], [], [], [], [], []
+    def _voigt6_from_sym(self, U):
+        """Pack symmetric 3x3 into [11,22,33,12,13,23]."""
+        return np.array(
+            [U[0, 0], U[1, 1], U[2, 2], U[0, 1], U[0, 2], U[1, 2]], dtype=float
+        )
 
-        index_map = [(0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2)]
+    def _sym_from_voigt6(self, v):
+        """Unpack [11,22,33,12,13,23] into symmetric 3x3."""
+        U = np.zeros((3, 3), dtype=float)
+        U[0, 0], U[1, 1], U[2, 2] = v[0], v[1], v[2]
+        U[0, 1] = U[1, 0] = v[3]
+        U[0, 2] = U[2, 0] = v[4]
+        U[1, 2] = U[2, 1] = v[5]
+        return U
 
-        null_disp, transforms_disp = [], []
+    def _voigt6_transform_matrix(self, R):
+        """
+        Build 6x6 matrix T such that vec(U') = T vec(U)
+        for U' = R U R^T, using Voigt ordering [11,22,33,12,13,23] (no factor-of-2 convention).
+        """
+        basis = np.eye(6)
+        T = np.zeros((6, 6), dtype=float)
+        for a in range(6):
+            Ua = self._sym_from_voigt6(basis[a])
+            Uap = R @ Ua @ R.T
+            T[:, a] = self._voigt6_from_sym(Uap)
+        return T
+
+    def initialize_unit_cell_atoms(
+        self, tol=1e-6, rcond=None, enforce_identity=True
+    ):
+        S = np.asarray(self.S, dtype=float)
+
+        # Pre-split rotations/translations
+        Rall = S[:, :, :3]  # (n,3,3)
+        tall = S[:, :, 3]  # (n,3)
+
+        null_list, x0_list = [], []
+        transforms_list, transforms_disp_list = [], []
+        atms, js, bs = [], [], []
+        null_disp_list = []
+
+        # Optional: detect identity operator index (best-effort)
+        if enforce_identity:
+            I3 = np.eye(3)
+            # identity op should have R≈I and t≈0 (mod 1)
+            twrap = self._wrap(tall)
+            is_id = np.all(
+                np.isclose(Rall, I3, atol=tol, rtol=0), axis=(1, 2)
+            ) & np.all(
+                np.isclose(twrap, 0.0, atol=tol, rtol=0)
+                | np.isclose(twrap, 1.0, atol=tol, rtol=0),
+                axis=1,
+            )
+            id_idx = int(np.argmax(is_id)) if np.any(is_id) else 0
+        else:
+            id_idx = 0
 
         for j, site in enumerate(self.sites):
             atm, x, y, z, occ, U = site
-            x, y, z = self._wrap([x, y, z])
-            equiv = self._wrap(np.einsum("ijk,k->ij", self.S, [x, y, z, 1]))
-            mask = np.isclose(equiv, [x, y, z]).all(axis=1)
-            equiv = np.round(equiv / tol) * tol
-            equiv, index = np.unique(equiv, axis=0, return_index=True)
-            transforms.append(self.S[index])
-            atms += [atm] * len(index)
-            js += [j] * len(index)
-            P = self.S[mask].mean(axis=0)
-            A = np.concatenate(
-                [
-                    self.S[i, :, :3] - np.eye(3)
-                    for i in np.arange(len(mask))[mask]
-                ],
-                axis=0,
-            )
-            N = scipy.linalg.null_space(A)
-            null.append(N)
-            x0.append(P @ [x, y, z, 1] - P[:, 3])
+            xv = np.asarray(self._wrap([x, y, z]), dtype=float)
+
+            # Orbit (all equivalent positions) and coset representatives
+            equiv = self._wrap((Rall @ xv) + tall)  # (n,3)
+
+            # Identify stabilizer: ops that map x onto itself modulo lattice translations.
+            # Robust compare via wrapped difference.
+            diff = self._wrap(equiv - xv)
+            mask = np.all(np.isclose(diff, 0.0, atol=tol, rtol=0), axis=1)
+
+            if enforce_identity and not np.any(mask):
+                mask[id_idx] = True
+
+            # Unique equivalent positions (orbit) and store corresponding operators as coset reps
+            equiv_q = np.round(equiv / tol) * tol
+            uniq_pos, uniq_idx = np.unique(equiv_q, axis=0, return_index=True)
+            ops_orbit = S[uniq_idx]  # (m,3,4)
+            transforms_list.append(ops_orbit)
+
+            # Expand bookkeeping for each orbit member
+            m = len(uniq_idx)
+            atms += [atm] * m
+            js += [j] * m
+
+            # scattering length (per atom type; repeated per orbit member)
             atom = Atom(atm)
             atm_dict = atom.neutron()
             br = atm_dict["coh_scatt_length_real"]
             bi = atm_dict["coh_scatt_length_img"]
             b = br + bi * 1j
-            bs.append(b)
+            bs += [b] * m
 
-            T = np.zeros((len(self.S[index]), 6, 6))
-            for m, R in enumerate(self.S[index, :, :3]):
-                for a, (i, j) in enumerate(index_map):
-                    for b, (k, l) in enumerate(index_map):
-                        Tijkl = R[i, k] * R[j, l]
-                        if k != l:
-                            Tijkl += R[i, l] * R[j, k]
-                        T[m, a, b] = Tijkl
-            transforms_disp.append(T)
-            T = np.zeros((len(self.S[mask]), 6, 6))
-            for m, R in enumerate(self.S[mask, :, :3]):
-                for a, (i, j) in enumerate(index_map):
-                    for b, (k, l) in enumerate(index_map):
-                        Tijkl = R[i, k] * R[j, l]
-                        if k != l:
-                            Tijkl += R[i, l] * R[j, k]
-                        T[m, a, b] = Tijkl
-            A = np.concatenate(
-                [T[i] - np.eye(6) for i in range(len(T))], axis=0
+            # ---- Position refinables: solve (R - I) x = n - t for stabilizer ops ----
+            ops_stab = S[mask]
+            Rstab = ops_stab[:, :, :3]
+            tstab = ops_stab[:, :, 3]
+
+            # Build A and b for all stabilizer ops:
+            # (R - I)x = n - t, where n is chosen integer vector so that R*x + t - x - n ≈ 0
+            A_blocks = []
+            b_blocks = []
+            for R, t in zip(Rstab, tstab):
+                delta = (
+                    (R @ xv) + t - xv
+                )  # should be ~ integer vector for stabilizer
+                nvec = np.round(delta)  # choose nearest integer shift
+                A_blocks.append(R - np.eye(3))
+                b_blocks.append(nvec - t)
+
+            A = np.concatenate(A_blocks, axis=0)  # (3k,3)
+            bvec = np.concatenate(b_blocks, axis=0)  # (3k,)
+
+            # Particular solution (least-squares) and null space
+            x_part, *_ = np.linalg.lstsq(A, bvec, rcond=rcond)
+            x_part = np.asarray(x_part, dtype=float)
+            x0_list.append(self._wrap(x_part))
+
+            N = scipy.linalg.null_space(A)  # (3, dof)
+            null_list.append(N)
+
+            # ---- ADP refinables in Voigt6: U' = R U R^T; translation irrelevant ----
+            # Build T for orbit reps (use their rotations)
+            T_orbit = np.zeros((m, 6, 6), dtype=float)
+            for ii, R in enumerate(ops_orbit[:, :, :3]):
+                T_orbit[ii] = self._voigt6_transform_matrix(R)
+            transforms_disp_list.append(T_orbit)
+
+            # Stabilizer constraints for U: (T - I) u = 0
+            T_stab = np.zeros((Rstab.shape[0], 6, 6), dtype=float)
+            for ii, R in enumerate(Rstab):
+                T_stab[ii] = self._voigt6_transform_matrix(R)
+            AU = np.concatenate(
+                [T_stab[ii] - np.eye(6) for ii in range(T_stab.shape[0])],
+                axis=0,
             )
-            N = scipy.linalg.null_space(A)
-            null_disp.append(N)
+            NU = scipy.linalg.null_space(AU)  # (6, dofU)
+            null_disp_list.append(NU)
 
-        self.null = null
-        self.x0 = x0
-
-        self.transforms = transforms
-        self.atms = np.array(atms)
-        self.js = np.array(js)
-        self.bs = np.array(bs)
-
-        self.null_disp = null_disp
-        self.transforms_disp = transforms_disp
+        self.null = null_list
+        self.x0 = x0_list
+        self.transforms = transforms_list
+        self.atms = np.asarray(atms)
+        self.js = np.asarray(js, dtype=int)
+        self.bs = np.asarray(bs, dtype=complex)
+        self.null_disp = null_disp_list
+        self.transforms_disp = transforms_disp_list
 
     def generate_symmetry_transforms(self):
         space_group = self.crystal_structure.getSpaceGroup()
@@ -455,7 +536,7 @@ class NuclearStructureRefinement:
             + "-".join(["run_{}".format(i) for i in range(n - 1)]),
         )
 
-    def extract_parameters(self, params):
+    def extract_parameters(self, params, Uiso=0):
         sites = []
 
         for i, site in enumerate(self.sites):
@@ -466,7 +547,6 @@ class NuclearStructureRefinement:
             y = params[var.format("y")].value
             z = params[var.format("z")].value
             occ = params[var.format("occ")].value
-            Uiso = 0
 
             sites.append([name, x, y, z, occ, Uiso])
 
@@ -830,172 +910,6 @@ class NuclearStructureRefinement:
             yx = 1 / np.sqrt(1 + xx)
             return yx
 
-    def extinction_jacobian(self, param, F2):
-        """
-        Analytical derivative dy/dparam for the extinction correction
-
-        Returns
-        -------
-        dy_dp : array
-            derivative of extinction factor y wrt `param` for each reflection
-        """
-        two_theta = self.two_theta
-        lamda = self.lamda
-        V = self.V
-
-        if self.model.lower() == "type ii":
-            # xp = k / V^2 * lamda^2 * r2 * F2
-            k = 1e2
-            xp = self.extinction_xp(param, F2, lamda, V)
-            # yp = 1 / (1 + c1 * xp**c2)
-            # dyp/dparam = - c1 * c2 * xp**(c2-1) * (dxp/dparam) / (1 + c1*xp**c2)**2
-            dxp_dp = k / V**2 * lamda**2 * F2
-            denom = (1 + self.c1 * xp**self.c2) ** 2
-            dy_dp = -self.c1 * self.c2 * (xp ** (self.c2 - 1)) * dxp_dp / denom
-            return dy_dp
-        elif self.model.lower().startswith("type ii"):
-            # xs = k / V^2 * lamda^3 * g / sin(two_theta) * Tbar * F2
-            k = 1e2
-            xs = self.extinction_xs(param, F2, two_theta, lamda, self.Tbar, V)
-            dxs_dp = (
-                k
-                / V**2
-                * lamda**3
-                * 1.0
-                / np.sin(two_theta)
-                * self.Tbar
-                * F2
-            )
-            denom = (1 + self.c1 * xs**self.c2) ** 2
-            dy_dp = -self.c1 * self.c2 * (xs ** (self.c2 - 1)) * dxs_dp / denom
-            return dy_dp
-        else:
-            # shelx: xx = k / V^2 * lamda^3 * x / sin(two_theta) * F2
-            k = 1e2
-            xx = self.extinction_xx(param, F2, two_theta, lamda, V)
-            dxx_dp = k / V**2 * lamda**3 / np.sin(two_theta) * F2
-            dy_dp = -0.5 * (1 + xx) ** (-1.5) * dxx_dp
-            return dy_dp
-
-    def absorption_jacobian_coeffs(self, coeffs, eps=1e-20):
-        """
-        Compute derivative of the absorption correction `T` wrt each coefficient in
-        `coeffs` using the complex-step method. Returns an array of shape
-        (n_coeffs, n_reflections) where each row is dT/dcoeff_i.
-
-        Complex-step is chosen because the analytic chain-rule through the
-        ellipsoid geometry and exit-length quadratic is tedious and error-prone;
-        this gives machine-precision derivatives for smooth code paths.
-        """
-        coeffs = np.asarray(coeffs, dtype=np.complex128)
-        n = coeffs.size
-        T_base = self.absorption_correction(coeffs.real)
-        jac = np.zeros((n, T_base.size), dtype=float)
-
-        for i in range(n):
-            pert = coeffs.copy()
-            pert[i] += 1j * eps
-            T_pert = self.absorption_correction(pert)
-            # derivative approx = imag(T_pert)/eps
-            jac[i, :] = np.imag(T_pert) / eps
-
-        return jac
-
-    def residuals_jacobian_wrt_parameters(self, params):
-        """
-        Build per-parameter derivatives of the residual vector for the
-        `objective_correction` residuals. Returns a dict mapping parameter
-        names to derivative arrays of length n_reflections.
-
-        This helper uses analytic formulas for extinction and scale/det/run
-        derivatives and complex-step for absorption coefficients.
-        """
-        # extract
-        sites, param, scale, coeffs, dets, runs = self.extract_parameters(
-            params
-        )
-
-        # precompute
-        F2s = self.F2s
-        y_abs = self.absorption_correction(coeffs)
-        y_ext = self.extinction_correction(param, F2s)
-        y = y_abs * y_ext
-        c = self.detector_bank_scale_factors(dets)
-        k = self.run_angle_scale_factors(runs)
-        sig = self.sig
-
-        # residual r = (scale * F2s * y * c * k - I_obs) / sig
-        common = (scale * F2s * c * k) / sig
-
-        jac = {}
-
-        # derivative wrt overall scale
-        jac["scale"] = (F2s * y * c * k) / sig
-
-        # derivative wrt extinction parameter
-        dy_dp_ext = self.extinction_jacobian(param, F2s)
-        jac["param"] = common * (y_abs * dy_dp_ext)
-
-        # derivative wrt absorption coeffs (use complex-step jacobian)
-        dT_dcoeffs = self.absorption_jacobian_coeffs(coeffs)
-        # map coefficient names to the same order used in `extract_parameters`
-        coeff_names = [
-            "alpha",
-            "beta",
-            "gamma",
-            "thickness",
-            "width",
-            "height",
-        ]
-        # d(y_abs)/dcoeff = dT/dcoeff ; dy/dcoeff = y_ext * dT/dcoeff
-        for i, cname in enumerate(coeff_names):
-            jac[f"coeff_{cname}"] = common * (y_ext * dT_dcoeffs[i, :])
-
-        # detector bank parameters: each param is applied per peak via self.detectors
-        # detectors array gives index per peak into the params array (0..n_banks-1)
-        n_banks = len(self.banks)
-        for j in range(n_banks):
-            mask = self.detectors == j
-            arr = np.zeros_like(self.I_obs, dtype=float)
-            arr[mask] = scale * F2s[mask] * y[mask] * k[mask] / sig[mask]
-            jac[f"det_{j}"] = arr
-
-        # run parameters similarly
-        n_runs = len(self.runs)
-        for j in range(n_runs):
-            mask = self.angles == j
-            arr = np.zeros_like(self.I_obs, dtype=float)
-            arr[mask] = scale * F2s[mask] * y[mask] * c[mask] / sig[mask]
-            jac[f"run_{j}"] = arr
-
-        return jac
-
-    def objective_correction_jac(self, params):
-        """
-        Jacobian for `objective_correction` compatible with lmfit/least_squares.
-
-        Returns a 2D array shaped (n_residuals, n_varying_parameters) ordered
-        according to `params` iteration order restricted to `par.vary==True`.
-        """
-        P = params
-        jac_map = self.residuals_jacobian_wrt_parameters(P)
-
-        # build column list in the same order lmfit will treat variables
-        var_names = [name for name, par in P.items() if par.vary]
-
-        n_res = self.I_obs.size
-        n_vars = len(var_names)
-        J = np.zeros((n_res, n_vars), dtype=float)
-
-        for j, name in enumerate(var_names):
-            if name in jac_map:
-                J[:, j] = jac_map[name]
-            else:
-                # parameter not handled explicitly -> zeros
-                J[:, j] = 0.0
-
-        return J
-
     def detector_bank_scale_factors(self, params):
         return params[self.detectors]
 
@@ -1173,7 +1087,9 @@ class NuclearStructureRefinement:
 
         for i in range(n_iter):
             self.F2s = self.calculate_structure_factors(self.params)
-            _, param, _, coeffs, _, _ = self.extract_parameters(self.params)
+            sites, param, _, coeffs, _, _ = self.extract_parameters(
+                self.params
+            )
             y_abs = self.absorption_correction(coeffs)
             y_ext = self.extinction_correction(param, self.F2s)
             self.y = y_abs * y_ext
@@ -1260,8 +1176,8 @@ class NuclearStructureRefinement:
 
             result = out.minimize(
                 method="leastsq",
-                Dfun=self.objective_correction_jac,
-                col_deriv=False,
+                # Dfun=self.objective_correction_jac,
+                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1288,8 +1204,8 @@ class NuclearStructureRefinement:
 
             result = out.minimize(
                 method="leastsq",
-                Dfun=self.objective_correction_jac,
-                col_deriv=False,
+                # Dfun=self.objective_correction_jac,
+                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1314,7 +1230,12 @@ class NuclearStructureRefinement:
                 reduce_fcn=None,
             )
 
-            result = out.minimize(method="leastsq", max_nfev=100)
+            result = out.minimize(
+                method="leastsq",
+                # Dfun=self.objective_correction_jac,
+                # col_deriv=False,
+                max_nfev=100,
+            )
 
             if report:
                 print(f"Iteration {i + 1}/{n_iter} - " "Stage 5 (orientation)")
@@ -1327,6 +1248,17 @@ class NuclearStructureRefinement:
             self.plot_result()
 
             self.plot_sample_shape()
+
+            (
+                sites,
+                _param,
+                _scale,
+                _coeffs,
+                dets,
+                runs,
+            ) = self.extract_parameters(self.params)
+            self.initialize_crystal_structure(sites)
+            self.initialize_material()
 
             *_, dets, runs = self.extract_parameters(self.params)
 
@@ -1488,6 +1420,9 @@ class NuclearStructureRefinement:
         ax.set_ylabel(r"$|F|_\mathrm{obs}$")
         fig.savefig(output + "_ref.pdf", bbox_inches="tight")
 
+        cs = CrystalStructurePlot(self.sites, self.cell, self.space_group)
+        cs.plot(output + "_cryst_struct.pdf")
+
     def save_corrected_peaks(self):
         """
         Apply absorption corrections to all peaks and save to new file.
@@ -1495,7 +1430,7 @@ class NuclearStructureRefinement:
         """
         output = os.path.splitext(self.filename)[0] + "_corr.nxs"
 
-        LoadNexus(Filename=self.filename, OutputWorkspace="peaks_corr")
+        CloneWorkspace(InputWorkspace="peaks", OutputWorkspace="peaks_corr")
 
         all_params = self.extract_parameters(self.params)
 
@@ -1531,18 +1466,37 @@ class NuclearStructureRefinement:
 
         Tbar = self.Tbar.copy()
 
-        for idx, peak in enumerate(mtd["peaks_corr"]):
+        banks_corr = mtd["peaks_corr"].column("BankName")
+
+        for i, peak in enumerate(mtd["peaks_corr"]):
             I = peak.getIntensity()
             sig = peak.getSigmaIntensity()
 
-            I_corr = I / y_abs[idx]
-            sig_corr = sig / y_abs[idx]
+            run_no = peak.getRunNumber()
+            bank_name = banks_corr[i]
+
+            run_scale, bank_scale = 1, 1
+
+            if bank_name in list(self.banks):
+                bank_index = int(np.where(self.banks == bank_name)[0][0])
+                bank_scale = float(dets[bank_index])
+
+            if run_no in list(self.runs):
+                run_idx = int(np.where(self.runs == run_no)[0][0])
+                run_scale = float(runs[run_idx])
+
+            scale = bank_scale * run_scale
+
+            I_corr = I / (y_abs[i] * scale)
+            sig_corr = sig / (y_abs[i] * scale)
 
             peak.setIntensity(I_corr)
             peak.setSigmaIntensity(sig_corr)
-            peak.setAbsorptionWeightedPathLength(Tbar[idx])
+            peak.setAbsorptionWeightedPathLength(Tbar[i])
 
         SaveNexus(InputWorkspace="peaks_corr", Filename=output)
+
+        CloneWorkspace(InputWorkspace="peaks_corr", OutputWorkspace="peaks")
 
     def plot_sample_shape(self):
         """
@@ -1754,41 +1708,3 @@ class NuclearStructureRefinement:
         Tbar = (w * t_total).mean(axis=0) / A
 
         return A, Tbar
-
-
-# ---
-
-# if __name__ == "__main__":
-# filename = "/SNS/CORELLI/IPTS-31429/shared/Attocube_test/normalization/garnet_withattocube_integration/garnet_withattocube_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-# filename = "/SNS/CORELLI/IPTS-31429/shared/kkl/garnet_4/garnet_4_integration/garnet_4_Cubic_I_d(min)=0.70_r(max)=0.20.nxs"
-# filename = "/SNS/MANDI/IPTS-34720/shared/2025B/garnet_2025_3mm_cal_integration/garnet_2025_3mm_cal_Cubic_I_d(min)=1.00_r(max)=0.10.nxs"
-
-# cell = [11.9386, 11.9386, 11.9386, 90, 90, 90]
-# space_group = "I a -3 d"
-# sites = [
-#     ["Yb", 0.125, 0.0, 0.25, 1, 0.0023],
-#     ["Al", 0.0, 0.0, 0.0, 1, 0.0023],
-#     ["Al", 0.375, 0.0, 0.25, 1, 0.0023],
-#     ["O", -0.03, 0.05, 0.149, 1, 0.0023],
-# ]
-
-# filename = "/SNS/CORELLI/IPTS-36263/shared/integration/EuAgAs_4K_integration/EuAgAs_4K_Hexagonal_P_(0.0,0.0,0.5)_d(min)=0.70_r(max)=0.20.nxs"
-
-# cell = [4.516, 4.516, 8.107, 90, 90, 120]
-# space_group = "P 63/m m c"
-# sites = [
-#     ["Eu", 0.0, 0.0, 0.0, 1.0, 0.0023],
-#     ["Ag", 0.33333333, 0.6666667, 0.75, 1.0, 0.0023],
-#     ["As", 0.33333333, 0.66666667, 0.25, 1.0, 0.0023],
-# ]
-
-# filename = "/SNS/TOPAZ/IPTS-31856/shared/2025B_Si_cal/Si_AG_cal_integration/Si_AG_cal_Cubic_F_d(min)=0.50_r(max)=0.20.nxs"
-# cell = [5.431, 5.431, 5.431, 90, 90, 90]
-# space_group = "F d -3 m"
-# sites = [["Si", 0.0, 0.0, 0.0, 1.0, 0.0023]]
-
-# nuclear = NuclearStructureRefinement(cell, space_group, sites, filename)
-# nuclear.refine(n_iter=50, abs_corr=True, det_corr=True, run_corr=True)
-# nuclear.plot_result()
-# nuclear.plot_sample_shape()
-# nuclear.save_corrected_peaks()
