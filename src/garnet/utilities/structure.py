@@ -128,8 +128,6 @@ class StructureAnalysis:
             n_iter=n_iter,
             abs_corr=self.refine_abs,
             ext_model=self.ext_model,
-            det_corr=True,
-            run_corr=True,
         )
         nuclear.plot_result()
         nuclear.plot_sample_shape()
