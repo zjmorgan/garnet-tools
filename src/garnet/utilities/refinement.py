@@ -1275,10 +1275,13 @@ class NuclearStructureRefinement:
 
         sites, param, scale, coeffs, dets, runs = all_params
 
+        ellip = self.ellipsoid_parameters(coeffs)
+        alpha, beta, gamma, thickness, width, height = ellip
+
         print("scale = {:1.4e}".format(scale))
         print("ext = {:6.4f}".format(param))
-        print("abs : {:6.1f} {:6.1f} {:6.1f}".format(*coeffs[:3]))
-        print("    : {:6.4f} {:6.4f} {:6.4f}".format(*coeffs[3:]))
+        print("abs : {:6.5f} {:6.5f} {:6.5f}".format(thickness, width, height))
+        print("    : {:6.1f} {:6.1f} {:6.1f}".format(alpha, beta, gamma))
         print("")
 
         for i, site in enumerate(self.sites):
@@ -1495,8 +1498,6 @@ class NuclearStructureRefinement:
             peak.setAbsorptionWeightedPathLength(Tbar[i])
 
         SaveNexus(InputWorkspace="peaks_corr", Filename=output)
-
-        CloneWorkspace(InputWorkspace="peaks_corr", OutputWorkspace="peaks")
 
     def plot_sample_shape(self):
         """

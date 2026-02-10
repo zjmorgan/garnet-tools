@@ -363,7 +363,7 @@ class AbsorptionCorrection:
         n = mat.numberDensityEffective  # A^-3
         N = mat.totalAtoms
 
-        V = np.abs(np.prod(self.params) * 10**3)  # cm^3
+        V = np.abs(np.prod(self.params) * 0.1**3)  # cm^3
 
         rho = (n / N) / 0.6022 * M
         m = rho * V * 1000  # mg
