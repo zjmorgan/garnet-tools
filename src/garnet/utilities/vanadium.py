@@ -540,11 +540,11 @@ class Vanadium:
                 OutputWorkspace="scale",
             )
 
-        Multiply(
-            LHSWorkspace="vanadium",
-            RHSWorkspace="scale",
-            OutputWorkspace="vanadium",
-        )
+        # Multiply(
+        #     LHSWorkspace="vanadium",
+        #     RHSWorkspace="scale",
+        #     OutputWorkspace="vanadium",
+        # )
 
         GroupDetectors(
             InputWorkspace="vanadium",
