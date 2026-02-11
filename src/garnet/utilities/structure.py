@@ -76,10 +76,9 @@ class StructureAnalysis:
 
         if self.sites is not None and self.space_group is not None:
             self.refimenent()
-            self.load_peaks()
 
-            if self.refine_abs:
-                self.apply_correction()
+            # if self.refine_abs:
+            #     self.apply_correction()
 
         self.save_peaks()
 

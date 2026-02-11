@@ -429,13 +429,11 @@ class Vanadium:
             "UnitCellVolume": float(a**3),
         }
 
-        SetSample(InputWorkspace="vanadium", Geometry=shape, Material=material)
+        SetSample(
+            InputWorkspace=self.instrument, Geometry=shape, Material=material
+        )
 
-        if self.beam_diameter is not None:
-            beam = {"Shape": "Circle", "Radius": self.beam_diameter * 0.05}
-            SetBeam(InputWorkspace="vanadium", Geometry=beam)
-
-        mat = mtd["vanadium"].sample().getMaterial()
+        mat = mtd[self.instrument].sample().getMaterial()
 
         sigma_a = mat.absorbXSection()
         sigma_s = mat.totalScatterXSection()
@@ -482,6 +480,20 @@ class Vanadium:
         print("equivalent radius: {:.4} cm".format(r))
 
         self.r = r * 10
+
+        material = {
+            "SampleNumberDensity": self.n,
+            "CoherentXSection": 0,
+            "IncoherentXSection": 0,
+            "AttenuationXSection": self.sigma_a,
+            "ScatteringXSection": 0,
+        }
+
+        SetSample(InputWorkspace="vanadium", Geometry=shape, Material=material)
+
+        if self.beam_diameter is not None:
+            beam = {"Shape": "Circle", "Radius": self.beam_diameter * 0.05}
+            SetBeam(InputWorkspace="vanadium", Geometry=beam)
 
     def apply_absorption_correction(self):
         ConvertUnits(

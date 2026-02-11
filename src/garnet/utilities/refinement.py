@@ -465,7 +465,7 @@ class NuclearStructureRefinement:
             self.width_ratio = parameters[1] / parameters[0]
             self.height_ratio = parameters[2] / parameters[0]
         else:
-            self.thickness = parameters
+            self.thickness = parameters / 10
 
     def add_absorption_extinction_parameters(self, params):
         params.add("param", value=1, min=np.finfo(float).eps, max=np.inf)
@@ -967,82 +967,6 @@ class NuclearStructureRefinement:
 
         return (scale * I_calc - self.I_obs) / self.sig
 
-    def structure_jacobian(self, params, eps=1e-20):
-        """
-        Compute derivatives of residuals for `objective_structure` using
-        complex-step on the complex amplitudes Fs and chain-rule to d(F2).
-
-        Returns a dict mapping parameter names to derivative arrays.
-        """
-        sites, param, scale, coeffs, dets, runs = self.extract_parameters(
-            params
-        )
-
-        # precompute
-        Fs0 = self.calculate_structure_amplitudes(params)
-        # map unique -> peaks
-        F2s0 = (Fs0 * Fs0.conj())[self.inverse].real
-
-        c = self.detector_bank_scale_factors(dets)
-        k = self.run_angle_scale_factors(runs)
-        y = self.y
-        sig = self.sig
-
-        jac = {}
-
-        # helper: compute residual derivative factor for a change in F2 (per-peak)
-        def df2_to_dr(dF2_peaks):
-            return (scale * dF2_peaks * y * c * k) / sig
-
-        # scale param
-        jac["scale"] = (F2s0 * y * c * k) / sig
-
-        # find varying parameter names
-        var_names = [name for name, par in params.items() if par.vary]
-
-        for name in var_names:
-            if name == "scale":
-                continue
-            # perturb parameter using complex-step
-            pcopy = params.copy()
-            try:
-                pcopy[name].value = pcopy[name].value + 1j * eps
-            except Exception:
-                # cannot perturb (e.g., non-numeric) -> zero derivative
-                jac[name] = np.zeros_like(self.I_obs, dtype=float)
-                continue
-
-            Fs_pert = self.calculate_structure_amplitudes(pcopy)
-            dFs = np.imag(Fs_pert) / eps
-
-            # dF2_unique = 2 * Re(conj(Fs0) * dFs)
-            dF2_unique = 2.0 * np.real(np.conj(Fs0) * dFs)
-            dF2_peaks = dF2_unique[self.inverse]
-
-            jac[name] = df2_to_dr(dF2_peaks)
-
-        return jac
-
-    def objective_structure_jac(self, params):
-        """
-        Jacobian matrix for `objective_structure` matching lmfit param order.
-        """
-        jac_map = self.structure_jacobian(params)
-
-        var_names = [name for name, par in params.items() if par.vary]
-
-        n_res = self.I_obs.size
-        n_vars = len(var_names)
-        J = np.zeros((n_res, n_vars), dtype=float)
-
-        for j, name in enumerate(var_names):
-            if name in jac_map:
-                J[:, j] = jac_map[name]
-            else:
-                J[:, j] = 0.0
-
-        return J
-
     def objective_correction(self, params):
         """
         Objective for absorption/extinction refinement.
@@ -1106,13 +1030,11 @@ class NuclearStructureRefinement:
                 self.objective_structure,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="negentropy",
             )
 
             result = out.minimize(
                 method="leastsq",
-                # Dfun=self.objective_structure_jac,
-                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1143,13 +1065,11 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="negentropy",
             )
 
             result = out.minimize(
                 method="leastsq",
-                # Dfun=self.objective_correction_jac,
-                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1171,13 +1091,11 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="negentropy",
             )
 
             result = out.minimize(
                 method="leastsq",
-                # Dfun=self.objective_correction_jac,
-                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1199,13 +1117,11 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="negentropy",
             )
 
             result = out.minimize(
                 method="leastsq",
-                # Dfun=self.objective_correction_jac,
-                # col_deriv=False,
                 max_nfev=100,
             )
 
@@ -1227,7 +1143,7 @@ class NuclearStructureRefinement:
                 self.objective_correction,
                 params,
                 nan_policy="omit",
-                reduce_fcn=None,
+                reduce_fcn="negentropy",
             )
 
             result = out.minimize(
@@ -1251,16 +1167,12 @@ class NuclearStructureRefinement:
 
             (
                 sites,
-                _param,
-                _scale,
-                _coeffs,
+                *_,
                 dets,
-                runs,
+                _,
             ) = self.extract_parameters(self.params)
             self.initialize_crystal_structure(sites)
             self.initialize_material()
-
-            *_, dets, runs = self.extract_parameters(self.params)
 
             self.save_detector_scales(dets)
 
@@ -1322,7 +1234,7 @@ class NuclearStructureRefinement:
 
         if det_corr:
             for i in range(len(self.banks)):
-                print("#{:} | {:6.4f}".format(self.banks[i], dets[i]))
+                print("{:} | {:6.4f}".format(self.banks[i], dets[i]))
             print("")
 
     def calculate_statistics(self, cutoff):
@@ -1459,7 +1371,7 @@ class NuclearStructureRefinement:
         n = material.numberDensityEffective
         sigma_tot = material.totalScatterXSection()
         sigma_abs = [material.absorbXSection(lamda) for lamda in lamdas]
-        mu = n * (sigma_tot + np.array(sigma_abs))
+        mu = n * np.array(sigma_abs)
 
         self.mu = mu
         self.ri_hat = np.array(ri_hat)
@@ -1498,6 +1410,8 @@ class NuclearStructureRefinement:
             peak.setAbsorptionWeightedPathLength(Tbar[i])
 
         SaveNexus(InputWorkspace="peaks_corr", Filename=output)
+
+        CloneWorkspace(InputWorkspace="peaks_corr", OutputWorkspace="peaks")
 
     def plot_sample_shape(self):
         """
@@ -1630,7 +1544,7 @@ class NuclearStructureRefinement:
             "ZYX", [gamma, beta, alpha], degrees=True
         ).as_matrix()
 
-        D = np.diag([1 / width**2, 1 / height**2, 1 / thickness**2]) / 4
+        D = np.diag([1 / width**2, 1 / height**2, 1 / thickness**2]) * 4
 
         return D, R, R @ D @ R.T
 
@@ -1655,7 +1569,7 @@ class NuclearStructureRefinement:
         self.Tbar = Tbar
         return self.T
 
-    def prepare_absorption_table(self, N=100, seed=42, beta=3):
+    def prepare_absorption_table(self, N=1000, seed=42, beta=4.5):
         rng = np.random.default_rng(seed)
 
         v = rng.normal(size=(N, 3))
@@ -1674,9 +1588,9 @@ class NuclearStructureRefinement:
     def initialize_correction(self, model="type II"):
         material = self.material
         n = material.numberDensityEffective
-        sigma_tot = material.totalScatterXSection()
+        # sigma_tot = material.totalScatterXSection()
         sigma_abs = [material.absorbXSection(lamda) for lamda in self.lamda]
-        self.mu = n * (sigma_tot + np.array(sigma_abs))
+        self.mu = n * np.array(sigma_abs)
         self.model = model.lower()
         self.c1 = self.f1[self.model](self.two_theta)
         self.c2 = self.f2[self.model](self.two_theta)
@@ -1684,6 +1598,7 @@ class NuclearStructureRefinement:
 
     def _exit_lengths_for_directions(self, Q, yQ, cquad, dirs):
         a = np.einsum("mi,ij,mj->m", dirs, Q, dirs)
+        a = np.maximum(a, 1e-8)
 
         b = 2 * (yQ @ dirs.T)
 
@@ -1691,6 +1606,7 @@ class NuclearStructureRefinement:
         disc = np.maximum(disc, 0.0)
 
         t = (-b + np.sqrt(disc)) / (2 * a[None, :])
+        t = np.maximum(t, 0.0)
         return t
 
     def _absorption_factors(self, mu, Q, yQ, cquad, n_in_rev, n_out_rev):
@@ -1699,13 +1615,15 @@ class NuclearStructureRefinement:
         dirs = np.vstack([n_in_rev, n_out_rev])
         t = self._exit_lengths_for_directions(Q, yQ, cquad, dirs)
 
-        t1 = t[:, :P]
-        t2 = t[:, P:]
-        t_total = t1 + t2
+        t_total = t[:, :P] + t[:, P:]  # (Nmc, P)
 
-        w = np.exp(-t_total * mu[None, :])
-        A = w.mean(axis=0)
+        w = np.exp(-t_total * mu[None, :])  # physics weight
+        ws = self.sample_weights[:, None]  # sampling weight
 
-        Tbar = (w * t_total).mean(axis=0) / A
+        ws_sum = np.sum(ws)  # scalar
+        A = np.sum(ws * w, axis=0) / ws_sum
+
+        denom = np.sum(ws * w, axis=0)
+        Tbar = np.sum(ws * w * t_total, axis=0) / np.clip(denom, 1e-30, None)
 
         return A, Tbar

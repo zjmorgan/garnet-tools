@@ -150,7 +150,7 @@ class AbsorptionCorrection:
         self.v_vector = v_vector
 
         if params is not None:
-            assert len(v_vector) == 3
+            assert len(params) == 3
 
         self.params = params
 
@@ -445,7 +445,7 @@ class AbsorptionCorrection:
 
             AddAbsorptionWeightedPathLengths(
                 InputWorkspace="_tmp",
-                ApplyCorrection=True,
+                ApplyCorrection=False,
                 UseSinglePath=False,
             )
 
@@ -472,9 +472,15 @@ class AbsorptionCorrection:
 
             corr = np.exp(mu * Tbar)
 
-            print("mu = {:4.2f} Tbar = {:4.2f}".format(mu, Tbar))
+            print(
+                "mu = {:4.2f} corr = {:4.2f} Tbar = {:4.2f}".format(
+                    mu, corr, Tbar
+                )
+            )
 
             peak.setBinCount(corr)
+            peak.setIntensity(peak.getIntensity() * corr)
+            peak.setSigmaIntensity(peak.getSigmaIntensity() * corr)
 
 
 class Peaks:
