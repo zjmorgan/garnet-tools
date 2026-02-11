@@ -483,10 +483,10 @@ class Vanadium:
 
         material = {
             "SampleNumberDensity": self.n,
-            "CoherentXSection": 0,
-            "IncoherentXSection": 0,
+            "CoherentXSection": 0.0,
+            "IncoherentXSection": 0.0,
             "AttenuationXSection": self.sigma_a,
-            "ScatteringXSection": 0,
+            "ScatteringXSection": 0.0,
         }
 
         SetSample(InputWorkspace="vanadium", Geometry=shape, Material=material)
