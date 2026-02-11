@@ -448,7 +448,7 @@ class Vanadium:
         self.n = n
 
         V = np.abs(
-            mtd["vanadium"].sample().getShape().volume() * 100**3
+            mtd[self.instrument].sample().getShape().volume() * 100**3
         )  # cm^3
 
         rho = (n / N) / 0.6022 * M
