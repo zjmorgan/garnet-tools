@@ -511,7 +511,6 @@ class Vanadium:
 
         AbsorptionCorrection(
             InputWorkspace="vanadium",
-            NumberOfWavelengthPoints=10,
             ElementSize=self.r / 10,
             OutputWorkspace="correction",
         )
@@ -540,11 +539,11 @@ class Vanadium:
                 OutputWorkspace="scale",
             )
 
-        # Multiply(
-        #     LHSWorkspace="vanadium",
-        #     RHSWorkspace="scale",
-        #     OutputWorkspace="vanadium",
-        # )
+        Multiply(
+            LHSWorkspace="vanadium",
+            RHSWorkspace="scale",
+            OutputWorkspace="vanadium",
+        )
 
         GroupDetectors(
             InputWorkspace="vanadium",
