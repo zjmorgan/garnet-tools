@@ -24,8 +24,8 @@ class SampleParameters:
 
         sample = {}
         sample["ThicknessWidthHeight"] = self.radii
-        sample["IndexAlongThickness"] = self.u_vector
-        sample["IndexTangentHeight"] = self.v_vector
+        sample["UVector"] = self.u_vector
+        sample["VVector"] = self.v_vector
 
         params["Sample"] = sample
 

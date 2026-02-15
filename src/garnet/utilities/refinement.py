@@ -59,11 +59,12 @@ class NuclearStructureRefinement:
             "type i lorentzian",
             "type ii",
             "shelx",
+            "none",
         ]
 
         self.thickness = 0.001
-        self.width_ratio = 1
-        self.height_ratio = 1
+        self.width = 0.001
+        self.height = 0.001
 
         if parameters is not None:
             self.update_sample(parameters)
@@ -281,7 +282,7 @@ class NuclearStructureRefinement:
 
             for j, val in enumerate(u):
                 params.add(
-                    var.format("u{}".format(j)),
+                    var.format("uval{}".format(j)),
                     value=val,
                     min=-10,
                     max=10,
@@ -296,7 +297,7 @@ class NuclearStructureRefinement:
                 x_const = "+".join(
                     ["{}".format(x0[0])]
                     + [
-                        "{}*{}".format(var.format("u{}".format(j)), N[0, j])
+                        "{}*{}".format(var.format("uval{}".format(j)), N[0, j])
                         for j in range(n)
                         if not np.isclose(N[0, j], 0)
                     ]
@@ -304,7 +305,7 @@ class NuclearStructureRefinement:
                 y_const = "+".join(
                     ["{}".format(x0[1])]
                     + [
-                        "{}*{}".format(var.format("u{}".format(j)), N[1, j])
+                        "{}*{}".format(var.format("uval{}".format(j)), N[1, j])
                         for j in range(n)
                         if not np.isclose(N[1, j], 0)
                     ]
@@ -312,7 +313,7 @@ class NuclearStructureRefinement:
                 z_const = "+".join(
                     ["{}".format(x0[2])]
                     + [
-                        "{}*{}".format(var.format("u{}".format(j)), N[2, j])
+                        "{}*{}".format(var.format("uval{}".format(j)), N[2, j])
                         for j in range(n)
                         if not np.isclose(N[2, j], 0)
                     ]
@@ -357,7 +358,7 @@ class NuclearStructureRefinement:
 
             for j in range(n):
                 params.add(
-                    var.format("b{}".format(j)),
+                    var.format("bval{}".format(j)),
                     value=0,
                     min=-np.inf,
                     max=np.inf,
@@ -366,42 +367,42 @@ class NuclearStructureRefinement:
             if n > 0:
                 beta11_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[0, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[0, j])
                         for j in range(n)
                         if not np.isclose(N[0, j], 0)
                     ]
                 )
                 beta22_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[1, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[1, j])
                         for j in range(n)
                         if not np.isclose(N[1, j], 0)
                     ]
                 )
                 beta33_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[2, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[2, j])
                         for j in range(n)
                         if not np.isclose(N[2, j], 0)
                     ]
                 )
                 beta23_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[3, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[3, j])
                         for j in range(n)
                         if not np.isclose(N[3, j], 0)
                     ]
                 )
                 beta13_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[4, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[4, j])
                         for j in range(n)
                         if not np.isclose(N[4, j], 0)
                     ]
                 )
                 beta12_const = "+".join(
                     [
-                        "{}*{}".format(var.format("b{}".format(j)), N[5, j])
+                        "{}*{}".format(var.format("bval{}".format(j)), N[5, j])
                         for j in range(n)
                         if not np.isclose(N[5, j], 0)
                     ]
@@ -462,13 +463,15 @@ class NuclearStructureRefinement:
     def update_sample(self, parameters):
         if type(parameters) is list:
             self.thickness = parameters[0] / 10
-            self.width_ratio = parameters[1] / parameters[0]
-            self.height_ratio = parameters[2] / parameters[0]
+            self.width = parameters[1] / 10
+            self.height = parameters[2] / 10
         else:
             self.thickness = parameters / 10
+            self.width = parameters / 10
+            self.height = parameters / 10
 
     def add_absorption_extinction_parameters(self, params):
-        params.add("param", value=1, min=np.finfo(float).eps, max=np.inf)
+        params.add("param", value=0.001, min=0, max=np.inf)
 
         angles = ["alpha", "beta", "gamma"]
 
@@ -480,21 +483,26 @@ class NuclearStructureRefinement:
                 max=180,
             )
 
+        vol = np.pi / 6 * self.thickness * self.width * self.height
+
+        width_thickness_ratio = self.width / self.thickness
+        height_thickness_ratio = self.height / self.thickness
+
         params.add(
-            "coeff_thickness",
-            value=self.thickness,
-            min=0.0001,
-            max=5.0,
+            "coeff_volume",
+            value=vol,
+            min=np.pi / 6 * 0.001**3,
+            max=np.pi / 6 * 2**3,
         )
         params.add(
-            "coeff_width",
-            value=self.width_ratio,
+            "coeff_width_thickness",
+            value=width_thickness_ratio,
             min=0.2,
             max=5,
         )
         params.add(
-            "coeff_height",
-            value=self.height_ratio,
+            "coeff_height_thickness",
+            value=height_thickness_ratio,
             min=0.2,
             max=5,
         )
@@ -536,6 +544,13 @@ class NuclearStructureRefinement:
             + "-".join(["run_{}".format(i) for i in range(n - 1)]),
         )
 
+        for i in range(2):
+            params.add(
+                "norm_{}".format(i),
+                value=0.0,
+                vary=True,
+            )
+
     def extract_parameters(self, params, Uiso=0):
         sites = []
 
@@ -553,7 +568,14 @@ class NuclearStructureRefinement:
         param = params["param"].value
         scale = params["scale"].value
 
-        names = ["alpha", "beta", "gamma", "thickness", "width", "height"]
+        names = [
+            "alpha",
+            "beta",
+            "gamma",
+            "volume",
+            "width_thickness",
+            "height_thickness",
+        ]
 
         coeffs = np.array(
             [params["coeff_{}".format(names[i])].value for i in range(6)]
@@ -567,7 +589,17 @@ class NuclearStructureRefinement:
             [params["run_{}".format(i)].value for i in range(len(self.runs))]
         )
 
-        return sites, param, scale, coeffs, dets, runs
+        norm = np.array([params["norm_{}".format(i)].value for i in range(2)])
+
+        return {
+            "sites": sites,
+            "param": param,
+            "scale": scale,
+            "coeffs": coeffs,
+            "dets": dets,
+            "runs": runs,
+            "norm": norm,
+        }
 
     def load_hkls(self, filename):
         if not mtd.doesExist("peaks"):
@@ -901,14 +933,16 @@ class NuclearStructureRefinement:
             xp = self.extinction_xp(param, F2, lamda, V)
             yp = 1 / (1 + self.c1 * xp**self.c2)
             return yp
-        elif self.model.lower().startswith("type ii"):
+        elif self.model.lower().startswith("type i"):
             xs = self.extinction_xs(param, F2, two_theta, lamda, Tbar, V)
             ys = 1 / (1 + self.c1 * xs**self.c2)
             return ys
-        else:  # shelx
+        elif self.model.lower() == "shelx":
             xx = self.extinction_xx(param, F2, two_theta, lamda, V)
             yx = 1 / np.sqrt(1 + xx)
             return yx
+        else:
+            return np.ones_like(F2)
 
     def detector_bank_scale_factors(self, params):
         return params[self.detectors]
@@ -954,9 +988,11 @@ class NuclearStructureRefinement:
         current absorption/extinction parameters as fixed values.
         """
 
-        all_params = self.extract_parameters(params)
+        p = self.extract_parameters(params)
 
-        sites, param, scale, coeffs, dets, runs = all_params
+        scale = p["scale"]
+        dets = p["dets"]
+        runs = p["runs"]
 
         F2s = self.calculate_structure_factors(params)
 
@@ -975,13 +1011,19 @@ class NuclearStructureRefinement:
         current structural model.
         """
 
-        all_params = self.extract_parameters(params)
+        p = self.extract_parameters(params)
 
-        sites, param, scale, coeffs, dets, runs = all_params
+        param = p["param"]
+        scale = p["scale"]
+        coeffs = p["coeffs"]
+        dets = p["dets"]
+        runs = p["runs"]
+        norm = p["norm"]
 
         y_abs = self.absorption_correction(coeffs)
         y_ext = self.extinction_correction(param, self.F2s)
-        y = y_abs * y_ext
+        y_norm = self.normalization_correction(norm)
+        y = y_abs * y_ext * y_norm
 
         c = self.detector_bank_scale_factors(dets)
         k = self.run_angle_scale_factors(runs)
@@ -992,188 +1034,213 @@ class NuclearStructureRefinement:
 
         return wr
 
+    def _minimize_stage(
+        self,
+        objective,
+        vary_flags,
+        stage_name,
+        iter_num,
+        n_iter,
+        report,
+        reduce_fcn=None,
+        fixed=[],
+    ):
+        """
+        Helper to minimize a stage by setting parameter vary flags.
+
+        Parameters
+        ----------
+        objective : callable
+            Objective function (e.g., objective_structure, objective_correction).
+        vary_flags : dict
+            Maps parameter name patterns to bool; e.g. {"coeff_": True, "param": False}.
+        stage_name : str
+            Stage label for reporting.
+        iter_num : int
+            Current iteration number (1-indexed).
+        n_iter : int
+            Total iterations.
+        report : bool
+            Whether to print report.
+        reduce_fcn : str, optional
+            Reduction function for Minimizer (e.g. "negentropy").
+        fixed : list, optional
+            List of parameter names that should never be varied.
+
+        Returns
+        -------
+        result : lmfit Result
+            Minimization result.
+        """
+        params = self.params.copy()
+
+        for name, par in params.items():
+            if name in fixed or par.expr is not None:
+                par.vary = False
+            elif name == "scale":
+                par.vary = True
+            else:
+                par.vary = False  # Default off
+                for pattern, do_vary in vary_flags.items():
+                    if pattern in name:
+                        par.vary = do_vary
+                        break
+
+        kw = {"nan_policy": "omit"}
+        if reduce_fcn:
+            kw["reduce_fcn"] = reduce_fcn
+        out = Minimizer(objective, params, **kw)
+        result = out.minimize(method="leastsq", max_nfev=100)
+        self.params = result.params
+
+        if report:
+            print(f"Iteration {iter_num}/{n_iter} - {stage_name}")
+            self.report(result, False, False)
+
+        return result
+
     def refine(
         self,
         report=True,
         cutoff=15,
-        n_iter=3,
+        n_iter=10,
         abs_corr=True,
         det_corr=False,
         run_corr=False,
+        norm_corr=False,
         ext_model="shelx",
     ):
+        """
+        Iterative refinement protocol: 6 stages per iteration.
+
+        Per iteration:
+          1. Structure + scale (fixed corrections).
+          2. Absorption only.
+          3. Extinction only.
+          4. Detector scales (optional).
+          5. Run/orientation scales (optional).
+          6. Normalization scales (optional).
+        """
         self.initialize_correction(ext_model)
+
+        struct_params = ["_uval", "_bval", "_occ"]
 
         fixed = []
         for name, par in self.params.items():
-            if par.vary == False:
-                fixed.append(name)
+            if par.vary == False or par.expr is not None:
+                if any(p in name for p in struct_params):
+                    fixed.append(name)
 
         for i in range(n_iter):
+            # Update corrections based on current parameters
             self.F2s = self.calculate_structure_factors(self.params)
-            sites, param, _, coeffs, _, _ = self.extract_parameters(
-                self.params
-            )
+            p = self.extract_parameters(self.params)
+            coeffs = p["coeffs"]
+            param = p["param"]
+            norm = p["norm"]
+
             y_abs = self.absorption_correction(coeffs)
             y_ext = self.extinction_correction(param, self.F2s)
-            self.y = y_abs * y_ext
+            y_norm = self.normalization_correction(norm)
+            self.y = y_abs * y_ext * y_norm
 
-            # --- Stage 1: structure + scale, fixed absorption/extinction
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("coeff_") or name == "param":
-                    par.vary = False
-                elif name not in fixed:
-                    par.vary = True
-
-            out = Minimizer(
+            # --- Stage 1: structure + scale (fixed corrections)
+            self._minimize_stage(
                 self.objective_structure,
-                params,
-                nan_policy="omit",
-                reduce_fcn="negentropy",
+                {p: True for p in struct_params},
+                "Stage 1 (structure + scale)",
+                i + 1,
+                n_iter,
+                report,
+                fixed=fixed,
             )
-
-            result = out.minimize(
-                method="leastsq",
-                max_nfev=100,
-            )
-
-            if report:
-                print(
-                    f"Iteration {i + 1}/{n_iter} - "
-                    "Stage 1 (structure + scale)"
-                )
-                self.report(result, det_corr, run_corr)
-
-            self.params = result.params
 
             self.F2s = self.calculate_structure_factors(self.params)
-
-            self.params = result.params
-
             self.calculate_statistics(cutoff)
 
             # --- Stage 2: absorption only
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("coeff_"):
-                    par.vary = abs_corr
-                else:
-                    par.vary = False
-
-            out = Minimizer(
+            self._minimize_stage(
                 self.objective_correction,
-                params,
-                nan_policy="omit",
-                reduce_fcn="negentropy",
+                {"coeff_": abs_corr},
+                "Stage 2 (absorption)",
+                i + 1,
+                n_iter,
+                report and abs_corr,
+                fixed=fixed,
             )
 
-            result = out.minimize(
-                method="leastsq",
-                max_nfev=100,
-            )
-
-            if report:
-                print(f"Iteration {i + 1}/{n_iter} - " "Stage 2 (absorption)")
-                self.report(result, det_corr, run_corr)
-
-            self.params = result.params
+            p = self.extract_parameters(self.params)
+            coeffs = p["coeffs"]
+            y_abs = self.absorption_correction(coeffs)
+            self.y = y_abs * y_ext * y_norm
 
             # --- Stage 3: extinction only
-            params = self.params.copy()
-            for name, par in params.items():
-                if name == "param":
-                    par.vary = True
-                else:
-                    par.vary = False
-
-            out = Minimizer(
+            self._minimize_stage(
                 self.objective_correction,
-                params,
-                nan_policy="omit",
-                reduce_fcn="negentropy",
+                {"param": True},
+                "Stage 3 (extinction)",
+                i + 1,
+                n_iter,
+                report,
+                fixed=fixed,
             )
 
-            result = out.minimize(
-                method="leastsq",
-                max_nfev=100,
-            )
+            p = self.extract_parameters(self.params)
+            param = p["param"]
+            y_ext = self.extinction_correction(param, self.F2s)
+            self.y = y_abs * y_ext * y_norm
 
-            if report:
-                print(f"Iteration {i + 1}/{n_iter} - " "Stage 3 (extinction)")
-                self.report(result, det_corr, run_corr)
-
-            self.params = result.params
-
-            # --- Stage 4: calibration only
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("det_"):
-                    par.vary = det_corr
-                else:
-                    par.vary = False
-
-            out = Minimizer(
+            # --- Stage 4: detector scales only
+            self._minimize_stage(
                 self.objective_correction,
-                params,
-                nan_policy="omit",
-                reduce_fcn="negentropy",
+                {"det_": det_corr},
+                "Stage 4 (detector scales)",
+                i + 1,
+                n_iter,
+                report and det_corr,
+                fixed=fixed,
             )
 
-            result = out.minimize(
-                method="leastsq",
-                max_nfev=100,
-            )
-
-            if report:
-                print(f"Iteration {i + 1}/{n_iter} - " "Stage 4 (calibration)")
-                self.report(result, det_corr, run_corr)
-
-            self.params = result.params
-
-            # --- Stage 5: orientation only
-            params = self.params.copy()
-            for name, par in params.items():
-                if name.startswith("run_"):
-                    par.vary = run_corr
-                else:
-                    par.vary = False
-
-            out = Minimizer(
+            # --- Stage 5: run/orientation scales only
+            self._minimize_stage(
                 self.objective_correction,
-                params,
-                nan_policy="omit",
-                reduce_fcn="negentropy",
+                {"run_": run_corr},
+                "Stage 5 (run scales)",
+                i + 1,
+                n_iter,
+                report and run_corr,
+                fixed=fixed,
             )
 
-            result = out.minimize(
-                method="leastsq",
-                # Dfun=self.objective_correction_jac,
-                # col_deriv=False,
-                max_nfev=100,
+            # --- Stage 6: normalization only
+            self._minimize_stage(
+                self.objective_correction,
+                {"norm_": norm_corr},
+                "Stage 6 (normalization)",
+                i + 1,
+                n_iter,
+                report and norm_corr,
+                fixed=fixed,
             )
 
-            if report:
-                print(f"Iteration {i + 1}/{n_iter} - " "Stage 5 (orientation)")
-                self.report(result, det_corr, run_corr)
+            if norm_corr:
+                p = self.extract_parameters(self.params)
+                norm = p["norm"]
+                y_norm = self.normalization_correction(norm)
 
-            self.params = result.params
-
+            self.y = y_abs * y_ext * y_norm
             self.calculate_statistics(cutoff)
 
-            self.plot_result()
+            # Rebuild crystal structure and material after each iteration
+            p = self.extract_parameters(self.params)
+            sites = p["sites"]
+            dets = p["dets"]
 
-            self.plot_sample_shape()
-
-            (
-                sites,
-                *_,
-                dets,
-                _,
-            ) = self.extract_parameters(self.params)
             self.initialize_crystal_structure(sites)
             self.initialize_material()
 
+            self.plot_result()
+            self.plot_sample_shape()
             self.save_detector_scales(dets)
 
         self.save_corrected_peaks()
@@ -1183,9 +1250,15 @@ class NuclearStructureRefinement:
         print("χ² = {:.2f}".format(result.chisqr))
         print("χ²/dof = {:.2f}\n".format(result.redchi))
 
-        all_params = self.extract_parameters(result.params)
+        p = self.extract_parameters(result.params)
 
-        sites, param, scale, coeffs, dets, runs = all_params
+        sites = p["sites"]
+        param = p["param"]
+        scale = p["scale"]
+        coeffs = p["coeffs"]
+        dets = p["dets"]
+        runs = p["runs"]
+        norm = p["norm"]
 
         ellip = self.ellipsoid_parameters(coeffs)
         alpha, beta, gamma, thickness, width, height = ellip
@@ -1226,6 +1299,8 @@ class NuclearStructureRefinement:
             )
 
         print("")
+        print("norm : {:6.4f} {:6.4f}".format(*norm))
+        print("")
 
         if run_corr:
             for i in range(len(self.runs)):
@@ -1238,26 +1313,25 @@ class NuclearStructureRefinement:
             print("")
 
     def calculate_statistics(self, cutoff):
-        all_params = self.extract_parameters(self.params)
+        p = self.extract_parameters(self.params)
 
-        (
-            self.sites,
-            self.param,
-            self.scale,
-            self.coeffs,
-            dets,
-            runs,
-        ) = all_params
+        self.sites = p["sites"]
+        self.param = p["param"]
+        self.scale = p["scale"]
+        self.coeffs = p["coeffs"]
+        dets = p["dets"]
+        runs = p["runs"]
+        norm = p["norm"]
 
         F2s = self.calculate_structure_factors(self.params)
 
         y_abs = self.absorption_correction(self.coeffs)
         y_ext = self.extinction_correction(self.param, F2s)
+        y_norm = self.normalization_correction(norm)
+        y = y_abs * y_ext * y_norm
 
         c = self.detector_bank_scale_factors(dets)
         k = self.run_angle_scale_factors(runs)
-
-        y = y_abs * y_ext
 
         I_calc = F2s * y * c * k
 
@@ -1268,6 +1342,10 @@ class NuclearStructureRefinement:
         F_obs = np.sqrt(self.I_obs / scale)
         F_calc = np.sqrt(self.I_calc / scale)
         F_sig = 0.5 * self.sig / np.sqrt(self.I_obs * scale)
+
+        self.F_obs_all = F_obs
+        self.F_calc_all = F_calc
+        self.F_sig_all = F_sig
 
         mask = np.abs(F_calc - F_obs) < cutoff * F_sig
 
@@ -1333,6 +1411,21 @@ class NuclearStructureRefinement:
         ax.set_title(title)
         ax.set_xlabel(r"$|F|_\mathrm{calc}$")
         ax.set_ylabel(r"$|F|_\mathrm{obs}$")
+
+        # ax = axs[1]
+        # ax.plot(F_lim, F_lim, color="C1")
+        # ax.errorbar(
+        #     self.F_calc_all,
+        #     self.F_obs_all,
+        #     yerr=self.F_sig_all,
+        #     fmt=".",
+        #     color="C0",
+        #     rasterized=True,
+        # )
+        # ax.set_aspect(1)
+        # ax.set_xlabel(r"$|F|_\mathrm{calc}$")
+        # ax.set_ylabel(r"$|F|_\mathrm{obs}$")
+
         fig.savefig(output + "_ref.pdf", bbox_inches="tight")
 
         cs = CrystalStructurePlot(self.sites, self.cell, self.space_group)
@@ -1347,9 +1440,13 @@ class NuclearStructureRefinement:
 
         CloneWorkspace(InputWorkspace="peaks", OutputWorkspace="peaks_corr")
 
-        all_params = self.extract_parameters(self.params)
-
-        _, param, scale, coeffs, dets, runs = all_params
+        p = self.extract_parameters(self.params)
+        scale = p["scale"]
+        param = p["param"]
+        coeffs = p["coeffs"]
+        dets = p["dets"]
+        runs = p["runs"]
+        norm = p["norm"]
 
         lamdas = []
         two_thetas = []
@@ -1369,15 +1466,19 @@ class NuclearStructureRefinement:
 
         material = self.material
         n = material.numberDensityEffective
-        sigma_tot = material.totalScatterXSection()
+        # sigma_tot = material.totalScatterXSection()
         sigma_abs = [material.absorbXSection(lamda) for lamda in lamdas]
         mu = n * np.array(sigma_abs)
+
+        self.lamda = np.array(lamdas)
+        self.two_theta = np.array(two_thetas)
 
         self.mu = mu
         self.ri_hat = np.array(ri_hat)
         self.sf_hat = np.array(sf_hat)
 
         y_abs = self.absorption_correction(coeffs)
+        y_norm = self.normalization_correction(norm)
 
         Tbar = self.Tbar.copy()
 
@@ -1397,13 +1498,15 @@ class NuclearStructureRefinement:
                 bank_scale = float(dets[bank_index])
 
             if run_no in list(self.runs):
-                run_idx = int(np.where(self.runs == run_no)[0][0])
-                run_scale = float(runs[run_idx])
+                run_index = int(np.where(self.runs == run_no)[0][0])
+                run_scale = float(runs[run_index])
 
             scale = bank_scale * run_scale
 
-            I_corr = I / (y_abs[i] * scale)
-            sig_corr = sig / (y_abs[i] * scale)
+            factor = y_abs[i] * y_norm[i] * scale
+
+            I_corr = I / factor
+            sig_corr = sig / factor
 
             peak.setIntensity(I_corr)
             peak.setSigmaIntensity(sig_corr)
@@ -1528,11 +1631,13 @@ class NuclearStructureRefinement:
         plt.close(fig)
 
     def ellipsoid_parameters(self, coeffs):
-        alpha, beta, gamma, scale, ratio_1, ratio_2 = coeffs
+        alpha, beta, gamma, vol, ratio_b, ratio_c = coeffs
 
-        thickness = scale
-        width = scale * ratio_1
-        height = scale * ratio_2
+        a = np.cbrt(6 * vol / (np.pi * ratio_b * ratio_c))
+
+        thickness = a
+        width = a * ratio_b
+        height = a * ratio_c
 
         return alpha, beta, gamma, thickness, width, height
 
@@ -1547,6 +1652,11 @@ class NuclearStructureRefinement:
         D = np.diag([1 / width**2, 1 / height**2, 1 / thickness**2]) * 4
 
         return D, R, R @ D @ R.T
+
+    def normalization_correction(self, params):
+        muRs, muRa = params
+        muR = muRs + muRa * self.lamda / 1.8
+        return 1 / self.spherical_absorption_correction(muR, self.two_theta)
 
     def absorption_correction(self, coeffs):
         D, R, Q = self.calculate_ellipsoid_surface(coeffs)
@@ -1569,7 +1679,7 @@ class NuclearStructureRefinement:
         self.Tbar = Tbar
         return self.T
 
-    def prepare_absorption_table(self, N=1000, seed=42, beta=4.5):
+    def prepare_absorption_table(self, N=1000, seed=42, beta=3):
         rng = np.random.default_rng(seed)
 
         v = rng.normal(size=(N, 3))
@@ -1591,21 +1701,23 @@ class NuclearStructureRefinement:
         # sigma_tot = material.totalScatterXSection()
         sigma_abs = [material.absorbXSection(lamda) for lamda in self.lamda]
         self.mu = n * np.array(sigma_abs)
-        self.model = model.lower()
+        self.model = model.lower() if type(model) == str else "none"
         self.c1 = self.f1[self.model](self.two_theta)
         self.c2 = self.f2[self.model](self.two_theta)
         self.prepare_absorption_table()
 
     def _exit_lengths_for_directions(self, Q, yQ, cquad, dirs):
         a = np.einsum("mi,ij,mj->m", dirs, Q, dirs)
-        a = np.maximum(a, 1e-8)
 
         b = 2 * (yQ @ dirs.T)
 
         disc = b * b - 4 * (cquad[:, None] * a[None, :])
         disc = np.maximum(disc, 0.0)
 
-        t = (-b + np.sqrt(disc)) / (2 * a[None, :])
+        eps = 1e-12
+        a_safe = np.where(np.abs(a) < eps, np.sign(a) * eps + eps, a)
+
+        t = (-b + np.sqrt(disc)) / (2 * a_safe[None, :])
         t = np.maximum(t, 0.0)
         return t
 
@@ -1618,7 +1730,11 @@ class NuclearStructureRefinement:
         t_total = t[:, :P] + t[:, P:]  # (Nmc, P)
 
         w = np.exp(-t_total * mu[None, :])  # physics weight
-        ws = self.sample_weights[:, None]  # sampling weight
+        ws = np.asarray(self.sample_weights, dtype=float)
+        if ws.ndim == 1 and ws.size == t_total.shape[0]:
+            ws = ws[:, None]
+        else:
+            ws = np.ones((t_total.shape[0], 1), dtype=float)
 
         ws_sum = np.sum(ws)  # scalar
         A = np.sum(ws * w, axis=0) / ws_sum

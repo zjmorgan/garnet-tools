@@ -1125,15 +1125,15 @@ class Peaks:
         ax.set_ylabel("Count rate")
         fig.savefig(filename + "_rate.pdf")
 
-        for peak in mtd[self.peaks]:
-            run = int(peak.getRunNumber())
-            rate = rate_dict.get(run)
-            if rate is None:
-                scale = 0
-            else:
-                scale = rate_ave / rate
-            peak.setIntensity(scale * peak.getIntensity())
-            peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
+        # for peak in mtd[self.peaks]:
+        #     run = int(peak.getRunNumber())
+        #     rate = rate_dict.get(run)
+        #     if rate is None:
+        #         scale = 0
+        #     else:
+        #         scale = rate_ave / rate
+        #     peak.setIntensity(scale * peak.getIntensity())
+        #     peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         self.info_dict = info_dict
         self.norm_dict = norm_dict
@@ -1240,13 +1240,9 @@ class Peaks:
 
         # self.rescale_intensities()
 
-    def renormalize_intensities(self):
-        self.flux_file = (
-            "/SNS/TOPAZ/shared/Vanadium/2025B_AG_4mm_sphere/flux.nxs"
-        )
-        self.solid_angle_file = (
-            "/SNS/TOPAZ/shared/Vanadium/2025B_AG_4mm_sphere/solid_angle.nxs"
-        )
+    def renormalize_intensities(self, flux, solid_angle):
+        self.flux_file = flux
+        self.solid_angle_file = solid_angle
 
         LoadNexus(Filename=self.flux_file, OutputWorkspace="flux")
         LoadNexus(Filename=self.solid_angle_file, OutputWorkspace="sa")

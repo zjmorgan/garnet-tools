@@ -3501,7 +3501,9 @@ class PeakEllipsoid:
         if not sig > 0:
             sig = float("-inf")
 
-        return intens, sig, b, b_err, vol, pk_cnts, pk_norm, bkg_cnts, bkg_norm
+        data_norm = pk_cnts, pk_norm, bkg_cnts, bkg_norm, ratio
+
+        return intens, sig, b, b_err, vol, *data_norm
 
     def fitted_profile(self, x0, x1, x2, d, n, kernel, c, S, p=0.997):
         scale = scipy.stats.chi2.ppf(p, df=1)
@@ -3521,7 +3523,7 @@ class PeakEllipsoid:
 
         structure = np.ones((3, 1, 1), dtype=bool)
 
-        mask = (ellipsoid <= 1) 
+        mask = ellipsoid <= 1
 
         for i in range(3):
             mask = scipy.ndimage.binary_dilation(mask, structure=structure)
@@ -3674,7 +3676,9 @@ class PeakEllipsoid:
 
         result = self.extract_intensity(d, n, pk, bkg, kernel)
 
-        intens, sig, b, b_err, N, pk_data, pk_norm, bkg_data, bkg_norm = result
+        intens, sig, b, b_err, N, *data_norm = result
+
+        pk_data, pk_norm, bkg_data, bkg_norm, ratio = data_norm
 
         intens *= d3x
         sig *= d3x
@@ -3693,7 +3697,7 @@ class PeakEllipsoid:
 
         self.info += [intens_raw, sig_raw]
 
-        self.info += [N, pk_data, pk_norm, bkg_data, bkg_norm]
+        self.info += [N, pk_data, pk_norm, bkg_data, bkg_norm, ratio]
 
         if not np.isfinite(sig):
             sig = float("inf")

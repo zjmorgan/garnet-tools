@@ -67,6 +67,7 @@ diagonstic_keys = [
     "pk_norm",
     "bkg_data",
     "bkg_norm",
+    "ratio",
     "Qx",
     "Qy",
     "Qz",
