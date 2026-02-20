@@ -149,7 +149,7 @@ class AutoReduce:
         kf_y = np.sin(tt) * np.sin(az)
         kf_z = np.cos(tt)
 
-        nu = np.rad2deg(np.arcsin(kf_y))
+        nu = np.rad2deg(np.arctan2(kf_y, np.sqrt(kf_x**2 + kf_z**2)))
         gamma = np.rad2deg(np.arctan2(kf_x, kf_z))
 
         figfile = io.BytesIO()
