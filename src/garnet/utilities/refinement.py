@@ -10,6 +10,10 @@ import numpy as np
 import pyvista as pv
 
 import matplotlib.pyplot as plt
+from matplotlib import colormaps
+from matplotlib.colors import Normalize
+from matplotlib.ticker import FormatStrFormatter
+from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 import scipy.linalg
@@ -97,13 +101,17 @@ class NuclearStructureRefinement:
         return val
 
     def _voigt6_from_sym(self, U):
-        """Pack symmetric 3x3 into [11,22,33,12,13,23]."""
+        """
+        Pack symmetric 3x3 into [11,22,33,12,13,23].
+        """
         return np.array(
             [U[0, 0], U[1, 1], U[2, 2], U[0, 1], U[0, 2], U[1, 2]], dtype=float
         )
 
     def _sym_from_voigt6(self, v):
-        """Unpack [11,22,33,12,13,23] into symmetric 3x3."""
+        """
+        Unpack [11,22,33,12,13,23] into symmetric 3x3.
+        """
         U = np.zeros((3, 3), dtype=float)
         U[0, 0], U[1, 1], U[2, 2] = v[0], v[1], v[2]
         U[0, 1] = U[1, 0] = v[3]
@@ -451,6 +459,7 @@ class NuclearStructureRefinement:
                 params.add(var.format("beta12"), expr=visit.format("beta12"))
 
         self.add_absorption_extinction_parameters(params)
+        self.add_beam_parameters(params)
         self.add_detector_run_scale_parameters(params)
 
         F2s = self.calculate_structure_factors(params)
@@ -508,6 +517,12 @@ class NuclearStructureRefinement:
         )
 
         self.params = params
+
+    def add_beam_parameters(self, params):
+        params.add("off_b", value=0.0, min=-0.01, max=0.01)
+        params.add("off_c", value=0.0, min=-np.inf, max=np.inf)
+        params.add("off_rx", value=0.0, min=-np.inf, max=np.inf)
+        params.add("off_rz", value=0.0, min=-np.inf, max=np.inf)
 
     def add_detector_run_scale_parameters(self, params):
         n = len(self.banks)
@@ -591,6 +606,15 @@ class NuclearStructureRefinement:
 
         norm = np.array([params["norm_{}".format(i)].value for i in range(2)])
 
+        off = np.array(
+            [
+                params["off_b"].value,
+                params["off_c"].value,
+                params["off_rx"].value,
+                params["off_rz"].value,
+            ]
+        )
+
         return {
             "sites": sites,
             "param": param,
@@ -599,6 +623,7 @@ class NuclearStructureRefinement:
             "dets": dets,
             "runs": runs,
             "norm": norm,
+            "off": off,
         }
 
     def load_hkls(self, filename):
@@ -610,10 +635,8 @@ class NuclearStructureRefinement:
     def extract_info(self):
         self.UB = mtd["peaks"].sample().getOrientedLattice().getUB()
 
-        lamdas, two_thetas, intensity, sigma = [], [], [], []
+        lamdas, two_thetas, intensity, sigma, G = [], [], [], [], []
         h, k, l, ri_hat, sf_hat, bank, run = [], [], [], [], [], [], []
-
-        coverage_two_theta, coverage_az_phi = [], []
 
         banks = mtd["peaks"].column("BankName")
 
@@ -634,7 +657,9 @@ class NuclearStructureRefinement:
             sig = peak.getSigmaIntensity()
             run_no = peak.getRunNumber()
 
-            if mnp.norm2() == 0 and I > 3 * sig and np.isfinite(I):
+            R = peak.getGoniometerMatrix()
+
+            if mnp.norm2() == 0 and I > 5 * sig and np.isfinite(I):
                 lamdas.append(lamda)
                 two_thetas.append(two_theta)
 
@@ -650,6 +675,8 @@ class NuclearStructureRefinement:
 
                 bank.append(banks[i])
                 run.append(run_no)
+
+                G.append(R)
 
         scale_factor = 10000 / np.nanpercentile(intensity, 99)
 
@@ -687,9 +714,12 @@ class NuclearStructureRefinement:
 
         self.ri_hat = np.array(ri_hat)[mask]
         self.sf_hat = np.array(sf_hat)[mask]
+        self.G = np.array(G)[mask]
 
-        self.two_theta_coverage = np.asarray(coverage_two_theta, float)
-        self.az_phi_coverage = np.asarray(coverage_az_phi, float)
+        pg = self.crystal_structure.getSpaceGroup().getPointGroup()
+        self.families = np.unique(
+            [pg.getEquivalents(hkl.tolist())[-1] for hkl in self.equiv], axis=0
+        )
 
     def initialize_crystal_structure(self, sites):
         cell_params = " ".join(6 * ["{}"]).format(*self.cell)
@@ -991,15 +1021,10 @@ class NuclearStructureRefinement:
         p = self.extract_parameters(params)
 
         scale = p["scale"]
-        dets = p["dets"]
-        runs = p["runs"]
 
         F2s = self.calculate_structure_factors(params)
 
-        c = self.detector_bank_scale_factors(dets)
-        k = self.run_angle_scale_factors(runs)
-
-        I_calc = F2s * self.y * c * k
+        I_calc = F2s * self.y
 
         return (scale * I_calc - self.I_obs) / self.sig
 
@@ -1019,16 +1044,18 @@ class NuclearStructureRefinement:
         dets = p["dets"]
         runs = p["runs"]
         norm = p["norm"]
+        off = p["off"]
 
         y_abs = self.absorption_correction(coeffs)
+        y_off = self.wobble_correction(off)
         y_ext = self.extinction_correction(param, self.F2s)
         y_norm = self.normalization_correction(norm)
-        y = y_abs * y_ext * y_norm
+        y_dets = self.detector_bank_scale_factors(dets)
+        y_runs = self.run_angle_scale_factors(runs)
 
-        c = self.detector_bank_scale_factors(dets)
-        k = self.run_angle_scale_factors(runs)
+        y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
 
-        I_calc = self.F2s * y * c * k
+        I_calc = self.F2s * y
 
         wr = (scale * I_calc - self.I_obs) / self.sig
 
@@ -1103,23 +1130,25 @@ class NuclearStructureRefinement:
         self,
         report=True,
         cutoff=15,
-        n_iter=10,
+        n_iter=3,
         abs_corr=True,
-        det_corr=False,
-        run_corr=False,
+        off_corr=True,
+        det_corr=True,
+        run_corr=True,
         norm_corr=False,
         ext_model="shelx",
     ):
         """
-        Iterative refinement protocol: 6 stages per iteration.
+        Iterative refinement protocol: 7 stages per iteration.
 
         Per iteration:
           1. Structure + scale (fixed corrections).
           2. Absorption only.
           3. Extinction only.
-          4. Detector scales (optional).
-          5. Run/orientation scales (optional).
-          6. Normalization scales (optional).
+          4. Wobble only.
+          5. Detector scales (optional).
+          6. Run/orientation scales (optional).
+          7. Normalization scales (optional).
         """
         self.initialize_correction(ext_model)
 
@@ -1138,11 +1167,18 @@ class NuclearStructureRefinement:
             coeffs = p["coeffs"]
             param = p["param"]
             norm = p["norm"]
+            off = p["off"]
+            dets = p["dets"]
+            runs = p["runs"]
 
             y_abs = self.absorption_correction(coeffs)
+            y_off = self.wobble_correction(off)
             y_ext = self.extinction_correction(param, self.F2s)
             y_norm = self.normalization_correction(norm)
-            self.y = y_abs * y_ext * y_norm
+            y_dets = self.detector_bank_scale_factors(dets)
+            y_runs = self.run_angle_scale_factors(runs)
+
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
 
             # --- Stage 1: structure + scale (fixed corrections)
             self._minimize_stage(
@@ -1172,7 +1208,7 @@ class NuclearStructureRefinement:
             p = self.extract_parameters(self.params)
             coeffs = p["coeffs"]
             y_abs = self.absorption_correction(coeffs)
-            self.y = y_abs * y_ext * y_norm
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
 
             # --- Stage 3: extinction only
             self._minimize_stage(
@@ -1188,35 +1224,61 @@ class NuclearStructureRefinement:
             p = self.extract_parameters(self.params)
             param = p["param"]
             y_ext = self.extinction_correction(param, self.F2s)
-            self.y = y_abs * y_ext * y_norm
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
 
-            # --- Stage 4: detector scales only
+            # --- Stage 4: wobble only
+            self._minimize_stage(
+                self.objective_correction,
+                {"off_": off_corr},
+                "Stage 4 (wobble)",
+                i + 1,
+                n_iter,
+                report and off_corr,
+                fixed=fixed,
+            )
+
+            p = self.extract_parameters(self.params)
+            off = p["off"]
+            y_off = self.wobble_correction(off)
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
+
+            # --- Stage 5: detector scales only
             self._minimize_stage(
                 self.objective_correction,
                 {"det_": det_corr},
-                "Stage 4 (detector scales)",
+                "Stage 5 (detector scales)",
                 i + 1,
                 n_iter,
                 report and det_corr,
                 fixed=fixed,
             )
 
-            # --- Stage 5: run/orientation scales only
+            p = self.extract_parameters(self.params)
+            dets = p["dets"]
+            y_dets = self.detector_bank_scale_factors(dets)
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
+
+            # --- Stage 6: run/orientation scales only
             self._minimize_stage(
                 self.objective_correction,
                 {"run_": run_corr},
-                "Stage 5 (run scales)",
+                "Stage 6 (run scales)",
                 i + 1,
                 n_iter,
                 report and run_corr,
                 fixed=fixed,
             )
 
-            # --- Stage 6: normalization only
+            p = self.extract_parameters(self.params)
+            runs = p["runs"]
+            y_runs = self.run_angle_scale_factors(runs)
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
+
+            # --- Stage 7: normalization only
             self._minimize_stage(
                 self.objective_correction,
                 {"norm_": norm_corr},
-                "Stage 6 (normalization)",
+                "Stage 7 (normalization)",
                 i + 1,
                 n_iter,
                 report and norm_corr,
@@ -1228,10 +1290,9 @@ class NuclearStructureRefinement:
                 norm = p["norm"]
                 y_norm = self.normalization_correction(norm)
 
-            self.y = y_abs * y_ext * y_norm
+            self.y = y_abs * y_off * y_ext * y_norm * y_dets * y_runs
             self.calculate_statistics(cutoff)
 
-            # Rebuild crystal structure and material after each iteration
             p = self.extract_parameters(self.params)
             sites = p["sites"]
             dets = p["dets"]
@@ -1243,6 +1304,7 @@ class NuclearStructureRefinement:
             self.plot_sample_shape()
             self.save_detector_scales(dets)
 
+        self.plot_hkl_families()
         self.save_corrected_peaks()
 
     def report(self, result, det_corr, run_corr):
@@ -1259,6 +1321,7 @@ class NuclearStructureRefinement:
         dets = p["dets"]
         runs = p["runs"]
         norm = p["norm"]
+        off = p["off"]
 
         ellip = self.ellipsoid_parameters(coeffs)
         alpha, beta, gamma, thickness, width, height = ellip
@@ -1302,6 +1365,10 @@ class NuclearStructureRefinement:
         print("norm : {:6.4f} {:6.4f}".format(*norm))
         print("")
 
+        b, c, rx, ry = off
+        print("beam : {:6.4f} {:6.4f} {:6.4f} {:6.4f}".format(b, c, rx, ry))
+        print("")
+
         if run_corr:
             for i in range(len(self.runs)):
                 print("#{:} | {:6.4f}".format(self.runs[i], runs[i]))
@@ -1322,13 +1389,15 @@ class NuclearStructureRefinement:
         dets = p["dets"]
         runs = p["runs"]
         norm = p["norm"]
+        off = p["off"]
 
         F2s = self.calculate_structure_factors(self.params)
 
         y_abs = self.absorption_correction(self.coeffs)
+        y_off = self.wobble_correction(off)
         y_ext = self.extinction_correction(self.param, F2s)
         y_norm = self.normalization_correction(norm)
-        y = y_abs * y_ext * y_norm
+        y = y_abs * y_off * y_ext * y_norm
 
         c = self.detector_bank_scale_factors(dets)
         k = self.run_angle_scale_factors(runs)
@@ -1431,6 +1500,155 @@ class NuclearStructureRefinement:
         cs = CrystalStructurePlot(self.sites, self.cell, self.space_group)
         cs.plot(output + "_cryst_struct.pdf")
 
+    def plot_absorption_correction(self, filename=None):
+        if self.filename is None and filename is None:
+            return
+
+        if filename is None:
+            filename = os.path.splitext(self.filename)[0] + "_abs.pdf"
+
+        two_theta_deg = np.rad2deg(self.two_theta)
+        lamda = self.lamda
+        A = self.T
+
+        fig, ax = plt.subplots(1, 1)
+
+        norm = Normalize(vmin=np.min(A), vmax=np.max(A))
+        cmap = colormaps["viridis"]
+
+        scatter = ax.scatter(
+            two_theta_deg,
+            lamda,
+            c=A,
+            s=1,
+            cmap=cmap,
+            norm=norm,
+            alpha=1,
+        )
+
+        ax.set_xlabel(r"$2\theta$ [degrees]")
+        ax.set_ylabel(r"$\lambda$ [$\AA$]")
+        ax.minorticks_on()
+        ax.xaxis.set_major_formatter(FormatStrFormatter(r"$%d^\circ$"))
+
+        cb = fig.colorbar(scatter, ax=ax, label="Absorption factor A")
+        cb.minorticks_on()
+
+        fig.savefig(filename, bbox_inches="tight")
+        plt.close(fig)
+
+    def plot_wobble_correction(self, off, filename=None):
+        """
+        Plot wobble correction scale factors vs rotation angle.
+
+        Shows observed data points and model curves for different wavelengths.
+        """
+        if self.filename is None and filename is None:
+            return
+
+        if filename is None:
+            filename = os.path.splitext(self.filename)[0] + "_off.pdf"
+
+        b, c, rx, rz = off
+
+        R = self.G
+        lamda = self.lamda
+
+        omega = np.rad2deg(np.arctan2(R[:, 0, 2], R[:, 0, 0]))
+        omega[omega < 0] += 360
+
+        x, _, _ = np.einsum("kij,j->ik", R, [rx, 0, rz])
+        x = x + c
+        y = np.exp(-0.5 * x**2 / (1.0 + b * lamda) ** 2)
+
+        fig, ax = plt.subplots(1, 1)
+        ax.plot(omega, y, ",", color="k")
+
+        omega_grid = np.linspace(0, 360, 361)
+        R_grid = [
+            Rotation.from_euler("y", val, degrees=True).as_matrix()
+            for val in omega_grid
+        ]
+
+        lamda_min, lamda_max = np.min(lamda), np.max(lamda)
+        norm = Normalize(vmin=lamda_min, vmax=lamda_max)
+        cmap = colormaps["turbo"]
+
+        for lam in np.linspace(lamda_min, lamda_max, 5):
+            xg, _, _ = np.einsum("kij,j->ik", R_grid, [rx, 0, rz])
+            xg = xg + c
+            yg = np.exp(-0.5 * xg**2 / (1.0 + b * lam) ** 2)
+            ax.plot(omega_grid, yg, color=cmap(norm(lam)))
+
+        ax.set_xlabel("Rotation angle")
+        ax.set_ylabel("Scale factor")
+        ax.minorticks_on()
+        ax.xaxis.set_major_formatter(FormatStrFormatter(r"$%d^\circ$"))
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        cb = fig.colorbar(sm, ax=ax, label=r"$\lambda$ [$\AA$]")
+        cb.minorticks_on()
+
+        fig.savefig(filename, bbox_inches="tight")
+
+    def plot_hkl_families(self, filename=None):
+        """
+        Create multi-page PDF with one page per hkl family.
+        """
+        if self.filename is None and filename is None:
+            return
+
+        if filename is None:
+            filename = os.path.splitext(self.filename)[0] + "_families.pdf"
+
+        I_calc = self.F2s * self.y * self.scale
+        I_obs = self.I_obs
+        I_sig = self.sig
+        hkls = self.hkls
+
+        pg = self.crystal_structure.getSpaceGroup().getPointGroup()
+
+        with PdfPages(filename) as pdf:
+            for family_hkl in self.families:
+                family_indices = []
+                for i, hkl in enumerate(hkls):
+                    equiv = np.array(pg.getEquivalents(hkl.tolist())[-1])
+                    if np.isclose(family_hkl, equiv).all():
+                        family_indices.append(i)
+
+                if len(family_indices) == 0:
+                    continue
+
+                ic = I_calc[family_indices]
+                io = I_obs[family_indices]
+                eo = I_sig[family_indices]
+
+                fig, ax = plt.subplots(1, 1, figsize=(6.4, 6.4))
+
+                lim = [
+                    np.min([np.min(ic), np.min(io)]),
+                    np.max([np.max(ic), np.max(io)]),
+                ]
+                lim = [lim[0] * 0.9, lim[1] * 1.1]
+
+                ax.plot(lim, lim, "-")
+                ax.errorbar(ic, io, yerr=eo, fmt="o", rasterized=True)
+
+                ax.set_xlim(*lim)
+                ax.set_ylim(*lim)
+                ax.set_aspect("equal")
+                ax.set_xlabel(r"$I_\mathrm{calc}$ [arb. units]")
+                ax.set_ylabel(r"$I_\mathrm{obs}$ [arb. units]")
+
+                h, k, l = family_hkl
+                ax.set_title(
+                    f"Family $({h:.0f}, {k:.0f}, {l:.0f})$ | $N = {len(family_indices)}$"
+                )
+                ax.minorticks_on()
+
+                pdf.savefig(fig, bbox_inches="tight")
+                plt.close(fig)
+
     def save_corrected_peaks(self):
         """
         Apply absorption corrections to all peaks and save to new file.
@@ -1442,27 +1660,31 @@ class NuclearStructureRefinement:
 
         p = self.extract_parameters(self.params)
         scale = p["scale"]
-        param = p["param"]
         coeffs = p["coeffs"]
         dets = p["dets"]
         runs = p["runs"]
         norm = p["norm"]
+        off = p["off"]
 
         lamdas = []
         two_thetas = []
         ri_hat = []
         sf_hat = []
+        G = []
 
         for peak in mtd["peaks_corr"]:
             lamda = peak.getWavelength()
             two_theta = peak.getScattering()
             ri = peak.getSourceDirectionSampleFrame()
             sf = peak.getDetectorDirectionSampleFrame()
+            R = peak.getGoniometerMatrix()
 
             lamdas.append(lamda)
             two_thetas.append(two_theta)
             ri_hat.append(ri)
             sf_hat.append(sf)
+
+            G.append(R)
 
         material = self.material
         n = material.numberDensityEffective
@@ -1476,8 +1698,10 @@ class NuclearStructureRefinement:
         self.mu = mu
         self.ri_hat = np.array(ri_hat)
         self.sf_hat = np.array(sf_hat)
+        self.G = np.array(G)
 
         y_abs = self.absorption_correction(coeffs)
+        y_off = self.wobble_correction(off)
         y_norm = self.normalization_correction(norm)
 
         Tbar = self.Tbar.copy()
@@ -1503,7 +1727,7 @@ class NuclearStructureRefinement:
 
             scale = bank_scale * run_scale
 
-            factor = y_abs[i] * y_norm[i] * scale
+            factor = y_abs[i] * y_off[i] * y_norm[i] * scale
 
             I_corr = I / factor
             sig_corr = sig / factor
@@ -1658,7 +1882,49 @@ class NuclearStructureRefinement:
         muR = muRs + muRa * self.lamda / 1.8
         return 1 / self.spherical_absorption_correction(muR, self.two_theta)
 
-    def absorption_correction(self, coeffs):
+    def beam_weights(self, sample_points, G, ds, bx, by, sigma):
+        """
+        Calculate Gaussian beam weights for sample points.
+
+        Parameters
+        ----------
+        sample_points : ndarray, shape (N, 3)
+            Monte Carlo sample points in sample frame
+        G : ndarray, shape (P, 3, 3)
+            Goniometer matrices for each peak
+        ds : ndarray, shape (P, 3)
+            Sample center offset in sample frame for each peak
+        bx, by : float
+            Beam center position in lab frame
+        sigma : float
+            Gaussian beam width
+
+        Returns
+        -------
+        bw : ndarray, shape (N, P)
+            Beam weights for each sample point and peak
+        """
+        xs = sample_points.astype(np.float32)
+        ds = np.asarray(ds, dtype=np.float32)
+        G = np.asarray(G, dtype=np.float32)
+
+        xsp = xs[None, :, :] + ds[:, None, :]
+        xl = np.einsum("pij,pnj->pni", G, xsp)
+
+        dx = xl[:, :, 0] - np.float32(bx)
+        dy = xl[:, :, 1] - np.float32(by)
+
+        inv2s2 = np.float32(1.0) / (
+            np.float32(2.0) * np.float32(sigma) * np.float32(sigma)
+        )
+        bw = np.exp(-(dx * dx + dy * dy) * inv2s2)
+
+        return bw.T
+
+    def absorption_correction(
+        self,
+        coeffs,
+    ):
         D, R, Q = self.calculate_ellipsoid_surface(coeffs)
 
         S = (R @ np.diag(1 / np.sqrt(np.diag(D)))).astype(np.float32)
@@ -1695,6 +1961,40 @@ class NuclearStructureRefinement:
         self.sample_weights = w.astype(np.float32)
         self.N_mc = N
 
+    def wobble_correction(self, off):
+        """
+        Scale model for off-centering/wobble correction.
+
+        Based on WobbleCorrection model: accounts for beam displacement
+        and sample misalignment effects on intensity measurements.
+
+        Parameters
+        ----------
+        off : array-like
+            [b, c, rx, rz] where:
+            - b: spread (wavelength-dependent scaling)
+            - c: center displacement
+            - rx: in-plane displacement
+            - rz: beam displacement
+
+        Returns
+        -------
+        array
+            Scale factors for each reflection
+        """
+        b, c, rx, rz = off
+
+        R = self.G
+        lamda = self.lamda
+
+        x, _, _ = np.einsum("kij,j->ik", R, [rx, 0, rz])
+
+        x = x + c
+
+        scales = np.exp(-0.5 * x**2 / (1.0 + b * lamda) ** 2)
+
+        return scales
+
     def initialize_correction(self, model="type II"):
         material = self.material
         n = material.numberDensityEffective
@@ -1727,16 +2027,12 @@ class NuclearStructureRefinement:
         dirs = np.vstack([n_in_rev, n_out_rev])
         t = self._exit_lengths_for_directions(Q, yQ, cquad, dirs)
 
-        t_total = t[:, :P] + t[:, P:]  # (Nmc, P)
+        t_total = t[:, :P] + t[:, P:]
 
-        w = np.exp(-t_total * mu[None, :])  # physics weight
-        ws = np.asarray(self.sample_weights, dtype=float)
-        if ws.ndim == 1 and ws.size == t_total.shape[0]:
-            ws = ws[:, None]
-        else:
-            ws = np.ones((t_total.shape[0], 1), dtype=float)
+        w = np.exp(-t_total * mu[None, :])
+        ws = self.sample_weights[:, None]
 
-        ws_sum = np.sum(ws)  # scalar
+        ws_sum = np.sum(ws, axis=0)
         A = np.sum(ws * w, axis=0) / ws_sum
 
         denom = np.sum(ws * w, axis=0)

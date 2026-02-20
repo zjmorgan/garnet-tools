@@ -1043,7 +1043,7 @@ class Peaks:
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
             FilterVariable="Signal/Noise",
-            FilterValue=1,
+            FilterValue=3,
             Operator=">",
         )
 
@@ -1053,7 +1053,7 @@ class Peaks:
             InputWorkspace=self.peaks,
             OutputWorkspace=self.peaks,
             FilterVariable="Signal/Noise",
-            FilterValue=1,
+            FilterValue=3,
             Operator=">",
         )
 
@@ -1116,7 +1116,7 @@ class Peaks:
             x.append(key)
             y.append(rate_dict[key])
 
-        rate_ave = np.mean(y)
+        # rate_ave = np.mean(y)
 
         fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
         ax.set_xlabel("")

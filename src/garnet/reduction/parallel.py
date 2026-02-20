@@ -25,6 +25,24 @@ faulthandler.enable()
 import pickle
 
 
+def dethread_environment():
+    config["MultiThreaded.MaxCores"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["TBB_THREAD_ENABLED"] = "0"
+
+
+def reset_environment():
+    config["MultiThreaded.MaxCores"] = "4"
+    os.environ.pop("OPENBLAS_NUM_THREADS", None)
+    os.environ.pop("MKL_NUM_THREADS", None)
+    os.environ.pop("NUMEXPR_NUM_THREADS", None)
+    os.environ.pop("OMP_NUM_THREADS", None)
+    os.environ.pop("TBB_THREAD_ENABLED", None)
+
+
 def _worker_call(func, kv):
     try:
         return func(kv)
@@ -69,12 +87,7 @@ class ParallelTasks:
 
         join_args = [(plan, s, proc) for proc, s in enumerate(split)]
 
-        config["MultiThreaded.MaxCores"] = "1"
-        os.environ["OPENBLAS_NUM_THREADS"] = "1"
-        os.environ["MKL_NUM_THREADS"] = "1"
-        os.environ["NUMEXPR_NUM_THREADS"] = "1"
-        os.environ["OMP_NUM_THREADS"] = "1"
-        os.environ["TBB_THREAD_ENABLED"] = "0"
+        dethread_environment()
 
         if n_proc == 1:
             self.results = [
@@ -103,12 +116,7 @@ class ParallelTasks:
             pool.close()
             pool.join()
 
-        config["MultiThreaded.MaxCores"] = "4"
-        os.environ.pop("OPENBLAS_NUM_THREADS", None)
-        os.environ.pop("MKL_NUM_THREADS", None)
-        os.environ.pop("NUMEXPR_NUM_THREADS", None)
-        os.environ.pop("OMP_NUM_THREADS", None)
-        os.environ.pop("TBB_THREAD_ENABLED", None)
+        reset_environment()
 
         if self.combine is not None:
             self.combine(plan, self.results)
@@ -134,6 +142,8 @@ class ParallelProcessor:
                 use_process = True
             except Exception:
                 use_process = False
+
+        dethread_environment()
 
         results = {}
         if self.n_proc > 1 and use_process:
@@ -173,4 +183,7 @@ class ParallelProcessor:
                     except Exception as e:
                         print("Exception in serial func call: {}".format(e))
                         traceback.print_exc()
+
+        reset_environment()
+
         return results
