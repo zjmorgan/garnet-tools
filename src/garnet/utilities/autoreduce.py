@@ -121,12 +121,16 @@ class AutoReduce:
         if mask_lost is not None:
             for btp in mask_lost:
                 bank, tube, pixel = btp
+                tube[0] //= c
+                tube[1] //= c
+                pixel[0] //= r
+                pixel[1] //= r
                 MaskBTP(
                     Workspace="lite",
                     Instrument=inst,
                     Bank=bank,
-                    Tube=int(tube) // c,
-                    Pixel=int(pixel) // r,
+                    Tube="{}-{}".format(*tube),
+                    Pixel="{}-{}".format(*pixel),
                 )
         banks = beamline["MaskBanks"]
 
