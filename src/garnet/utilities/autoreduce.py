@@ -31,7 +31,9 @@ from finddata import publish_plot
 
 from garnet.config.instruments import beamlines
 
-instrument_dict = {beamlines[key]["Name"]: key for key in beamlines.keys()}
+instrument_dict = {
+    beamlines[key]["InstrumentName"]: key for key in beamlines.keys()
+}
 
 
 class AutoReduce:

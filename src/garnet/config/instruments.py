@@ -111,7 +111,7 @@ beamlines = {
     },
     "IMAGINE": {
         "Facility": "HFIR",
-        "Name": "CG4D",
+        "Name": "IMAGINE",
         "InstrumentName": "CG4D",
         "FancyName": "IMAGINE",
         "Wavelength": [2, 4.5],
