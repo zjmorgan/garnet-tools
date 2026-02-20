@@ -39,7 +39,7 @@ class AutoReduce:
     def __init__(self, filename):
         self.filename = filename
 
-        facility, self.inst, *_ = self.filename.split("/")
+        facility, self.inst, *_ = self.filename.split("/")[1:]
 
         LoadEventNexus(
             Filename=self.filename, OutputWorkspace="data", NumberOfBins=1
