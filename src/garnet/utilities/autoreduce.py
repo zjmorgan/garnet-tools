@@ -51,7 +51,7 @@ class AutoReduce:
 
         filepath = os.path.join("/", facility, self.inst, "shared/autoreduce")
 
-        self.idf = glob.glob(os.path.join(filepath, "*_Definition_*.xml"))
+        self.idf = glob.glob(os.path.join(filepath, "*_Definition_*.xml"))[0]
 
         self.files = {}
 
