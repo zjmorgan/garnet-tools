@@ -92,6 +92,12 @@ class AutoReduce:
         )
         CompressEvents(InputWorkspace="lite", OutputWorkspace="lite")
 
+        LoadInstrument(
+            Workspace="lite",
+            Filename=self.idf,
+            RewriteSpectraMap="True",
+        )
+
         cols //= c
         rows //= r
         mask_cols //= c
@@ -118,12 +124,6 @@ class AutoReduce:
                 Instrument=inst,
                 Bank=bank,
             )
-
-        LoadInstrument(
-            Workspace="lite",
-            Filename=self.idf,
-            RewriteSpectraMap="True",
-        )
 
         out = "_" + ws if ws != "data" else ""
 
@@ -155,7 +155,16 @@ class AutoReduce:
         figfile = io.BytesIO()
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
-        ax.scatter(gamma, nu, c=data, s=1, norm="asinh", rasterized=True)
+        ax.scatter(
+            gamma,
+            nu,
+            c=data,
+            s=1,
+            norm="log",
+            vmin=1,
+            vmax=np.percentile(data, 99),
+            rasterized=True,
+        )
         ax.set_aspect(1)
         ax.minorticks_on()
         ax.set_xlabel(r"γ [°]")
