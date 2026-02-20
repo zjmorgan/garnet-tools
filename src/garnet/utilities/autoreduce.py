@@ -85,8 +85,8 @@ class AutoReduce:
 
         SumNeighbours(
             InputWorkspace=ws,
-            SumX=self.c,
-            SumY=self.r,
+            SumX=c,
+            SumY=r,
             OutputWorkspace="lite",
         )
         CompressEvents(InputWorkspace="lite", OutputWorkspace="lite")
