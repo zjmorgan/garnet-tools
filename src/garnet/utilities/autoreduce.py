@@ -179,7 +179,7 @@ class AutoReduce:
         st = os.stat("div.txt")
         os.chmod("div.txt", st.st_mode | stat.S_IWOTH | stat.S_IWGRP)
 
-        self.files[output] = div.format(output, figdata)
+        self.files["file"] = div.format(output, figdata)
 
     def publish_plots(self):
         request = publish_plot(self.inst, self.run, files=self.files)
