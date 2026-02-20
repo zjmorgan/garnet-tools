@@ -96,18 +96,19 @@ class AutoReduce:
         mask_cols //= c
         mask_rows //= r
 
+        inst = beamline["Name"]
+
         MaskBTP(
             Workspace="lite",
-            Instrument="lite",
+            Instrument=inst,
             Pixel="0-{},{}-{}".format(mask_rows, rows - mask_rows, rows),
         )
         MaskBTP(
             Workspace="lite",
-            Instrument="lite",
+            Instrument=inst,
             Tube="0-{},{}-{}".format(mask_cols, cols - mask_cols, cols),
         )
 
-        inst = beamline["Name"]
         banks = beamline["MaskBanks"]
 
         for bank in banks:
