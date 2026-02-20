@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from mantid import logger
 from mantid.simpleapi import (
     LoadEventNexus,
+    ExtractMonitors,
     SumNeighbours,
     CompressEvents,
     MaskBTP,
@@ -44,6 +45,12 @@ class AutoReduce:
 
         LoadEventNexus(
             Filename=self.filename, OutputWorkspace="data", NumberOfBins=1
+        )
+
+        ExtractMonitors(
+            InputWorkspace="data",
+            DetectorWorkspace="data",
+            MonitorWorkspace="monitors",
         )
 
         self.run = mtd["data"].getRunNumber()

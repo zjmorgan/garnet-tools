@@ -44,7 +44,7 @@ beamlines = {
         "Grouping": "1x4",
         "RawFile": "nexus/CORELLI_{}.nxs.h5",
         "BankPixels": [16, 256],
-        "MaskEdges": [2, 32],
+        "MaskEdges": [0, 16],
         "MaskBanks": [1, 2, 3, 4, 5, 6, 29, 30, 62, 63, 64, 65, 66, 67, 91],
         "MaskLost": [[58, [13, 16], [80, 130]], [59, [1, 4], [80, 130]]],
         "DeltaTheta": 0.16,
