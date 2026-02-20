@@ -17,7 +17,7 @@ from mantid import logger
 from mantid.simpleapi import (
     LoadEventNexus,
     ExtractMonitors,
-    SumNeighbours,
+    GroupDetectors,
     CompressEvents,
     MaskBTP,
     LoadInstrument,
@@ -91,12 +91,49 @@ class AutoReduce:
         cols, rows = beamline["BankPixels"]
         mask_cols, mask_rows = beamline["MaskEdges"]
 
-        SumNeighbours(
-            InputWorkspace=ws,
-            SumX=c,
-            SumY=r,
-            OutputWorkspace="lite",
+        PreprocessDetectorsToMD(
+            InputWorkspace="data", OutputWorkspace="detectors"
         )
+
+        det_map = np.asarray(mtd["detectors"].column(5)).reshape(
+            -1, cols, rows
+        )
+
+        nb, nc, nr = det_map.shape
+
+        gc = (np.arange(nc) // c).astype(np.int32)
+        gr = (np.arange(nr) // r).astype(np.int32)
+
+        ngc = (nc + c - 1) // c
+        ngr = (nr + r - 1) // r
+
+        group_id = (
+            (np.arange(nb, dtype=np.int32)[:, None, None] * (ngc * ngr))
+            + (gc[None, :, None] * ngr)
+            + gr[None, None, :]
+        ).ravel()
+
+        det_ids = det_map.ravel()
+
+        order = np.argsort(group_id, kind="stable")
+        g_sorted = group_id[order]
+        d_sorted = det_ids[order]
+
+        starts = np.flatnonzero(np.r_[True, g_sorted[1:] != g_sorted[:-1]])
+        ends = np.r_[starts[1:], g_sorted.size]
+
+        parts = []
+        for s, e in zip(starts, ends):
+            parts.append("+".join(map(str, d_sorted[s:e])))
+
+        detector_list = ",".join(parts)
+
+        GroupDetectors(
+            InputWorkspace="data",
+            GroupingPattern=detector_list,
+            OutputWorkspace="lit",
+        )
+
         CompressEvents(InputWorkspace="lite", OutputWorkspace="lite")
 
         LoadInstrument(
