@@ -131,7 +131,7 @@ class AutoReduce:
         GroupDetectors(
             InputWorkspace="data",
             GroupingPattern=detector_list,
-            OutputWorkspace="lit",
+            OutputWorkspace="lite",
         )
 
         CompressEvents(InputWorkspace="lite", OutputWorkspace="lite")
