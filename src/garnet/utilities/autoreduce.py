@@ -125,8 +125,8 @@ class AutoReduce:
                     Workspace="lite",
                     Instrument=inst,
                     Bank=bank,
-                    Tube=tube // c,
-                    Pixel=pixel // r,
+                    Tube=int(tube) // c,
+                    Pixel=int(pixel) // r,
                 )
         banks = beamline["MaskBanks"]
 
