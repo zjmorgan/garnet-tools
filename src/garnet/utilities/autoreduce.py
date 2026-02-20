@@ -123,7 +123,7 @@ class AutoReduce:
                 bank, tube, pixel = btp
                 MaskBTP(
                     Workspace="lite",
-                    Instrument=inst["Name"],
+                    Instrument=inst,
                     Bank=bank,
                     Tube=tube // c,
                     Pixel=pixel // r,
