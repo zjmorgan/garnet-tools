@@ -31,9 +31,7 @@ from finddata import publish_plot
 
 from garnet.config.instruments import beamlines
 
-instrument_dict = {
-    beamlines[key]["InstrumentName"]: key for key in beamlines.keys()
-}
+instrument_dict = {beamlines[key]["Name"]: key for key in beamlines.keys()}
 
 
 class AutoReduce:
@@ -163,7 +161,7 @@ class AutoReduce:
         ax.set_xlabel(r"γ [°]")
         ax.set_ylabel(r"ν [°]")
         ax.xaxis.set_inverted(True)
-        fig.savefig(figfile, format="svg", bbox_inches="tight")
+        fig.savefig(figfile, format="svg", dpi=300, bbox_inches="tight")
         plt.close()
 
         figfile.seek(0)
