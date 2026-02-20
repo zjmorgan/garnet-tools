@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import glob
+import stat
 import base64
 
 directory = os.path.dirname(os.path.realpath(__file__))
@@ -172,6 +173,11 @@ class AutoReduce:
             "nexus", "shared/autoreduce"
         )
         div = '<div><img alt="{}" src="data:image/svg+xml;base64,{}" /></div>'
+
+        with open("div.txt", "w") as f:
+            f.write(div)
+        st = os.stat("div.txt")
+        os.chmod("div.txt", st.st_mode | stat.S_IWOTH | stat.S_IWGRP)
 
         self.files[output] = div.format(output, figdata)
 
