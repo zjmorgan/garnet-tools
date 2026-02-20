@@ -156,14 +156,7 @@ class AutoReduce:
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
         ax.scatter(
-            gamma,
-            nu,
-            c=data,
-            s=1,
-            norm="log",
-            vmin=1,
-            vmax=np.percentile(data, 99),
-            rasterized=True,
+            gamma, nu, c=data, s=0.5, norm="log", rasterized=True, alpha=0.5
         )
         ax.set_aspect(1)
         ax.minorticks_on()
