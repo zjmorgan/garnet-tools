@@ -27,8 +27,12 @@ from mantid.simpleapi import (
     mtd,
 )
 
-
-from finddata import publish_plot
+try:
+    from finddata import publish_plot
+except ImportError:
+    webmonplot = False
+else:
+    webmonplot = True
 
 from garnet.config.instruments import beamlines
 
@@ -171,10 +175,8 @@ class AutoReduce:
         if mask_lost is not None:
             for btp in mask_lost:
                 bank, tube, pixel = btp
-                tube[0] //= c
-                tube[1] //= c
-                pixel[0] //= r
-                pixel[1] //= r
+                tube = [val // c for val in tube]
+                pixel = [val // r for val in pixel]
                 MaskBTP(
                     Workspace="lite",
                     Instrument=inst,
@@ -252,8 +254,9 @@ class AutoReduce:
         self.files["file"] = div.format(output, figdata)
 
     def publish_plots(self):
-        request = publish_plot(self.inst, self.run, files=self.files)
-        print(request)
+        if webmonplot:
+            request = publish_plot(self.inst, self.run, files=self.files)
+            print(request)
 
 
 if __name__ == "__main__":
