@@ -36,6 +36,8 @@ instrument_dict = {
     beamlines[key]["InstrumentName"]: key for key in beamlines.keys()
 }
 
+AUTOLITE = "/SNS/software/scd/lite/"
+
 
 class AutoReduce:
     def __init__(self, filename):
@@ -57,9 +59,13 @@ class AutoReduce:
 
         self.instrument = instrument_dict[self.inst]
 
-        filepath = os.path.join("/", facility, self.inst, "shared/autoreduce")
+        name = beamlines[self.instrument]["Name"]
 
-        self.idf = glob.glob(os.path.join(filepath, "*_Definition_*.xml"))[0]
+        idf = glob.glob(
+            os.path.join(AUTOLITE, "{}_Definition*.xml").format(name)
+        )
+
+        self.idf = idf[0] if len(idf) == 1 else None
 
         self.files = {}
 
@@ -187,9 +193,11 @@ class AutoReduce:
 
         out = "_" + ws if ws != "data" else ""
 
-        output = self.filename.replace(".nxs.h5", out + "_lite.nxs").replace(
-            "nexus", "shared/autoreduce"
-        )
+        fname, *exts = self.filename.split(os.extsep)
+
+        ext = ".lite." + ".".join(exts)
+
+        output = fname.replace("nexus", "shared/autoreduce") + out + ext
 
         SaveNexus(
             InputWorkspace="lite",
