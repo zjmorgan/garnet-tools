@@ -2012,35 +2012,35 @@ class PeakEllipsoid:
         elif mode == "2d_0":
             dx = [dx1[0, :, :], dx2[0, :, :]]
             d2 = np.einsum("i...,ij,j...->...", dx, inv_S[1:, 1:], dx)
-            m = 9
+            m = 7
             k = 2
         elif mode == "2d_1":
             dx = [dx0[:, 0, :], dx2[:, 0, :]]
             d2 = np.einsum("i...,ij,j...->...", dx, inv_S[0::2, 0::2], dx)
-            m = 9
+            m = 7
             k = 2
         elif mode == "2d_2":
             dx = [dx0[:, :, 0], dx1[:, :, 0]]
             d2 = np.einsum("i...,ij,j...->...", dx, inv_S[:2, :2], dx)
-            m = 9
+            m = 7
             k = 2
         elif mode == "1d_0":
             dx = dx0[:, 0, 0]
             d2 = inv_S[0, 0] * dx**2
-            m = 5
+            m = 4
             k = 1
         elif mode == "1d_1":
             dx = dx1[0, :, 0]
             d2 = inv_S[1, 1] * dx**2
-            m = 5
+            m = 4
             k = 1
         elif mode == "1d_2":
             dx = dx2[0, 0, :]
             d2 = inv_S[2, 2] * dx**2
-            m = 5
+            m = 4
             k = 1
 
-        mask = (d2 <= 2 ** (2 / k)) & np.isfinite(y) & (e > 0)
+        mask = (d2 <= 2 ** (2 / k)) & np.isfinite(e) & (e > 0)
 
         n = np.sum(mask)
 
@@ -3140,25 +3140,25 @@ class PeakEllipsoid:
         if np.sum(d) < 3 * np.sqrt(np.sum(d)):
             return None
 
-        y1d_0, e1d_0 = self.normalize(x0, x1, x2, d, n, "1d_0", 0, 0)
-        y1d_1, e1d_1 = self.normalize(x0, x1, x2, d, n, "1d_1", 0, 0)
-        y1d_2, e1d_2 = self.normalize(x0, x1, x2, d, n, "1d_2", 0, 0)
+        y1d_0, e1d_0 = self.normalize(x0, x1, x2, d, n, "1d_0", 1, 0)
+        y1d_1, e1d_1 = self.normalize(x0, x1, x2, d, n, "1d_1", 1, 0)
+        y1d_2, e1d_2 = self.normalize(x0, x1, x2, d, n, "1d_2", 1, 0)
 
         y1d = [y1d_0, y1d_1, y1d_2]
         e1d = [e1d_0, e1d_1, e1d_2]
 
         args_1d = [x0, x1, x2, y1d, e1d]
 
-        y2d_0, e2d_0 = self.normalize(x0, x1, x2, d, n, "2d_0", 0, 0)
-        y2d_1, e2d_1 = self.normalize(x0, x1, x2, d, n, "2d_1", 0, 0)
-        y2d_2, e2d_2 = self.normalize(x0, x1, x2, d, n, "2d_2", 0, 0)
+        y2d_0, e2d_0 = self.normalize(x0, x1, x2, d, n, "2d_0", 1, 0)
+        y2d_1, e2d_1 = self.normalize(x0, x1, x2, d, n, "2d_1", 1, 0)
+        y2d_2, e2d_2 = self.normalize(x0, x1, x2, d, n, "2d_2", 1, 0)
 
         y2d = [y2d_0, y2d_1, y2d_2]
         e2d = [e2d_0, e2d_1, e2d_2]
 
         args_2d = [x0, x1, x2, y2d, e2d]
 
-        y3d, e3d = self.normalize(x0, x1, x2, d, n, "3d", 0, 0)
+        y3d, e3d = self.normalize(x0, x1, x2, d, n, "3d", 1, 0)
 
         args_3d = [x0, x1, x2, y3d, e3d]
 
