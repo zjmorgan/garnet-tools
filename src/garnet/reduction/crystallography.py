@@ -57,7 +57,7 @@ for sg in gemmi.spacegroup_table():
     key = name in keys
 
     if key:
-        mantid_to_gemmi[name] = sg.hall
+        mantid_to_gemmi[name] = sg.hm
     else:
         gemmi_misses.append([name, sg.ext, sg.number])
 

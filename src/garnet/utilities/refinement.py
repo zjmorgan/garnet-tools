@@ -122,7 +122,8 @@ class NuclearStructureRefinement:
     def _voigt6_transform_matrix(self, R):
         """
         Build 6x6 matrix T such that vec(U') = T vec(U)
-        for U' = R U R^T, using Voigt ordering [11,22,33,12,13,23] (no factor-of-2 convention).
+        for U' = R U R^T, using Voigt ordering [11,22,33,12,13,23]
+        (no factor-of-2 convention).
         """
         basis = np.eye(6)
         T = np.zeros((6, 6), dtype=float)
@@ -659,7 +660,7 @@ class NuclearStructureRefinement:
 
             R = peak.getGoniometerMatrix()
 
-            if mnp.norm2() == 0 and I > 5 * sig and np.isfinite(I):
+            if mnp.norm2() == 0 and I > 3 * sig and np.isfinite(I):
                 lamdas.append(lamda)
                 two_thetas.append(two_theta)
 
@@ -682,7 +683,7 @@ class NuclearStructureRefinement:
 
         unique = ReflectionGenerator(self.crystal_structure)
         unique = unique.getHKLsUsingFilter(
-            d_min, float("inf"), ReflectionConditionFilter.Centering
+            d_min, float("inf"), ReflectionConditionFilter.StructureFactor
         )
 
         hkls = np.column_stack([h, k, l]).round().astype(int)
@@ -1129,12 +1130,12 @@ class NuclearStructureRefinement:
     def refine(
         self,
         report=True,
-        cutoff=15,
+        cutoff=10,
         n_iter=3,
-        abs_corr=True,
-        off_corr=True,
-        det_corr=True,
-        run_corr=True,
+        abs_corr=False,
+        off_corr=False,
+        det_corr=False,
+        run_corr=False,
         norm_corr=False,
         ext_model="shelx",
     ):
@@ -1314,7 +1315,6 @@ class NuclearStructureRefinement:
 
         p = self.extract_parameters(result.params)
 
-        sites = p["sites"]
         param = p["param"]
         scale = p["scale"]
         coeffs = p["coeffs"]
@@ -1945,7 +1945,7 @@ class NuclearStructureRefinement:
         self.Tbar = Tbar
         return self.T
 
-    def prepare_absorption_table(self, N=1000, seed=42, beta=3):
+    def prepare_absorption_table(self, N=100, seed=42, beta=3):
         rng = np.random.default_rng(seed)
 
         v = rng.normal(size=(N, 3))

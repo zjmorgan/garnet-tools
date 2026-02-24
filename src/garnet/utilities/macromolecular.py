@@ -24,7 +24,10 @@ class Macromolecular:
         mtz = gemmi.Mtz(with_base=True)
         mtz.set_logging(sys.stdout)
 
-        mtz.spacegroup = gemmi.find_spacegroup_by_name(space_group)
+        print(space_group)
+
+        mtz.spacegroup = gemmi.SpaceGroup(space_group)
+        # mtz.spacegroup = gemmi.find_spacegroup_by_name(space_group)
 
         unit_cell = gemmi.UnitCell(
             self.a, self.b, self.c, self.alpha, self.beta, self.gamma

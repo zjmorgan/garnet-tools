@@ -31,6 +31,7 @@ class StructureAnalysis:
             "UVector": [0, 0, 1],
             "VVector": [1, 0, 0],
             "ThicknessWidthHeight": [0, 0, 0],
+            "Refine": True,
         }
 
         defaults.update(config)
@@ -42,8 +43,9 @@ class StructureAnalysis:
         space_group = defaults.get("SpaceGroup")
         point_group = None
         if space_group is not None:
-            space_group = space_groups.get(space_group)
+            space_group = space_group.replace(" ", "")
             point_group = space_point.get(space_group)
+            space_group = space_groups.get(space_group)
 
         self.space_group = space_group
         self.point_group = point_group
@@ -53,7 +55,7 @@ class StructureAnalysis:
 
         self.refine_abs = False
         if self.space_group is not None and self.sites is not None:
-            self.refine_abs = True
+            self.refine_abs = defaults.get("Refine")
 
         self.chemical_formula = defaults.get("ChemicalFormula")
         self.z = defaults.get("ZParameter")
@@ -74,18 +76,17 @@ class StructureAnalysis:
         if apply_corr:
             self.apply_correction()
 
-        if self.sites is not None and self.space_group is not None:
+        if self.refine_abs:
             self.refimenent()
 
-            # if self.refine_abs:
-            #     self.apply_correction()
-
         self.save_peaks()
+        self.save_mtz()
 
     def save_mtz(self):
+        print(self.space_group)
         if self.space_group is not None:
             filename = os.path.splitext(self.filename)[0] + ".mtz"
-            sg = mantid_to_gemmi.get(self.space_group)
+            sg = mantid_to_gemmi.get(self.space_group.replace(" ", ""))
             if sg is not None:
                 mm = Macromolecular("peaks")
                 mm.write_mtz(filename, space_group=sg)
@@ -151,6 +152,7 @@ if __name__ == "__main__":
         config.update(params["Material"])
     if params.get("Integration") is not None:
         config.update(params["Integration"])
+    print(config)
 
     inst = Integration(params)
 

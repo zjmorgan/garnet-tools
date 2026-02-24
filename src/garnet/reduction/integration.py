@@ -1922,7 +1922,7 @@ class PeakEllipsoid:
 
         return y_int, e_int
 
-    def normalize(self, x0, x1, x2, d, n, mode="3d", x=0.01):
+    def normalize(self, x0, x1, x2, d, n, mode="3d", x=0.01, rel_err=0.05):
         dx0, dx1, dx2 = self.voxels(x0, x1, x2)
 
         if mode == "1d_0":
@@ -1970,7 +1970,7 @@ class PeakEllipsoid:
         u = (f - fmin) / (fmax - fmin + 1e-16)
         w = x + (1 - x) * u
 
-        y_int, e_int = self.data_norm(d_int, n_int)
+        y_int, e_int = self.data_norm(d_int, n_int, rel_err)
 
         return y_int, e_int / w
 
@@ -3140,25 +3140,25 @@ class PeakEllipsoid:
         if np.sum(d) < 3 * np.sqrt(np.sum(d)):
             return None
 
-        y1d_0, e1d_0 = self.normalize(x0, x1, x2, d, n, mode="1d_0")
-        y1d_1, e1d_1 = self.normalize(x0, x1, x2, d, n, mode="1d_1")
-        y1d_2, e1d_2 = self.normalize(x0, x1, x2, d, n, mode="1d_2")
+        y1d_0, e1d_0 = self.normalize(x0, x1, x2, d, n, "1d_0", 0, 0)
+        y1d_1, e1d_1 = self.normalize(x0, x1, x2, d, n, "1d_1", 0, 0)
+        y1d_2, e1d_2 = self.normalize(x0, x1, x2, d, n, "1d_2", 0, 0)
 
         y1d = [y1d_0, y1d_1, y1d_2]
         e1d = [e1d_0, e1d_1, e1d_2]
 
         args_1d = [x0, x1, x2, y1d, e1d]
 
-        y2d_0, e2d_0 = self.normalize(x0, x1, x2, d, n, mode="2d_0")
-        y2d_1, e2d_1 = self.normalize(x0, x1, x2, d, n, mode="2d_1")
-        y2d_2, e2d_2 = self.normalize(x0, x1, x2, d, n, mode="2d_2")
+        y2d_0, e2d_0 = self.normalize(x0, x1, x2, d, n, "2d_0", 0, 0)
+        y2d_1, e2d_1 = self.normalize(x0, x1, x2, d, n, "2d_1", 0, 0)
+        y2d_2, e2d_2 = self.normalize(x0, x1, x2, d, n, "2d_2", 0, 0)
 
         y2d = [y2d_0, y2d_1, y2d_2]
         e2d = [e2d_0, e2d_1, e2d_2]
 
         args_2d = [x0, x1, x2, y2d, e2d]
 
-        y3d, e3d = self.normalize(x0, x1, x2, d, n, mode="3d")
+        y3d, e3d = self.normalize(x0, x1, x2, d, n, "3d", 0, 0)
 
         args_3d = [x0, x1, x2, y3d, e3d]
 
