@@ -1321,9 +1321,9 @@ class LaueData(BaseDataModel):
                 FilterByTofMax=None,
             )
 
-            FilterBadPulses(
-                InputWorkspace=event_name, OutputWorkspace=event_name
-            )
+            # FilterBadPulses(
+            #     InputWorkspace=event_name, OutputWorkspace=event_name,
+            # )
 
         if type(runs) is list and mtd[event_name].isGroup():
             for run, ws in zip(runs, mtd[event_name].getNames()):
@@ -1817,7 +1817,7 @@ class LaueData(BaseDataModel):
             ExtractMask(
                 InputWorkspace="sa",
                 UngroupDetectors=True,
-                OutputWorkspace="sa_mask"
+                OutputWorkspace="sa_mask",
             )
 
         if not mtd.doesExist("flux"):
