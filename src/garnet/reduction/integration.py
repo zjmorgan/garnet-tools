@@ -143,20 +143,6 @@ class Integration(SubPlan):
         if mtd.doesExist("combine"):
             peaks.save_peaks(result_file, "combine")
 
-            peaks.create_peaks("combine", "merge", lean=True)
-
-            peak_dict = self.extract_merge_peak_info("combine")
-
-            self.n_proc = self.plan["NProc"]
-
-            results = self.integrate_merge(peak_dict)
-
-            self.update_merge_info("merge", results)
-
-            pk_file = self.get_diagnostic_file("merge")
-
-            peaks.save_peaks(pk_file, "merge")
-
             opt = Optimization("combine")
             opt.optimize_lattice(self.params["Cell"])
 
@@ -167,6 +153,25 @@ class Integration(SubPlan):
 
         self.cleanup()
         self.write(result_file)
+
+    def combine_merge(self, filename):
+        peaks = PeaksModel()
+
+        peaks.load_peaks(filename, "combine")
+
+        peaks.create_peaks("combine", "merge", lean=True)
+
+        peak_dict = self.extract_merge_peak_info("combine")
+
+        self.n_proc = self.plan["NProc"]
+
+        results = self.integrate_merge(peak_dict)
+
+        self.update_merge_info("merge", results)
+
+        pk_file = self.get_diagnostic_file("merge")
+
+        peaks.save_peaks(pk_file, "merge")
 
     def write(self, result_file):
         process = subprocess.Popen(

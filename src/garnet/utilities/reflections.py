@@ -562,215 +562,6 @@ class Peaks:
         with open(filename, "w") as f:
             f.write("{:.4e}".format(scale))
 
-    def remove_edge_peaks(self):
-        edge_pixels = {
-            "TOPAZ": ([24, 232], [24, 232]),
-            "MANDI": ([24, 232], [24, 232]),
-            "CORELLI": ([1, 15], [24, 232]),
-        }
-
-        inst = mtd[self.peaks].getInstrument()
-
-        cols, rows = edge_pixels[inst.getName()]
-
-        for peak in mtd[self.peaks]:
-            col = peak.getCol()
-            row = peak.getRow()
-            if not (cols[0] < col < cols[1]) or not (rows[0] < row < rows[1]):
-                peak.setSigmaIntensity(peak.getIntensity())
-
-    # def remove_off_centered(self):
-    #     aluminum = CrystalStructure(
-    #         "4.05 4.05 4.05", "F m -3 m", "Al 0 0 0 1.0 0.005"
-    #     )
-
-    #     copper = CrystalStructure(
-    #         "3.61 3.61 3.61", "F m -3 m", "Cu 0 0 0 1.0 0.005"
-    #     )
-
-    #     generator_al = ReflectionGenerator(aluminum)
-    #     generator_cu = ReflectionGenerator(copper)
-
-    #     d = np.array(mtd[self.peaks].column("DSpacing"))
-
-    #     d_min = np.nanmin(d)
-    #     d_max = np.nanmax(d)
-
-    #     hkls_al = generator_al.getUniqueHKLsUsingFilter(
-    #         d_min, d_max, ReflectionConditionFilter.StructureFactor
-    #     )
-
-    #     hkls_cu = generator_cu.getUniqueHKLsUsingFilter(
-    #         d_min, d_max, ReflectionConditionFilter.StructureFactor
-    #     )
-
-    #     d_al = np.unique(generator_al.getDValues(hkls_al))
-    #     d_cu = np.unique(generator_cu.getDValues(hkls_cu))
-
-    #     ol = mtd[self.peaks].sample().getOrientedLattice()
-
-    #     Q_vol = []
-    #     powder_err = []
-    #     peak_err = []
-    #     Q0_mod = []
-    #     Q_rad = []
-
-    #     for peak in mtd[self.peaks]:
-    #         h, k, l = peak.getHKL()
-    #         d0 = ol.d(h, k, l)
-    #         powder_err.append(peak.getDSpacing() / d0 - 1)
-    #         Q0_mod.append(2 * np.pi / d0)
-
-    #         shape = peak.getPeakShape()
-    #         if shape.shapeName() == "ellipsoid":
-    #             ellipsoid = eval(shape.toJSON())
-
-    #             v0 = [float(val) for val in ellipsoid["direction0"].split(" ")]
-    #             v1 = [float(val) for val in ellipsoid["direction1"].split(" ")]
-    #             v2 = [float(val) for val in ellipsoid["direction2"].split(" ")]
-
-    #             r0 = ellipsoid["radius0"]
-    #             r1 = ellipsoid["radius1"]
-    #             r2 = ellipsoid["radius2"]
-
-    #         else:
-    #             r0 = r1 = r2 = 1e-6
-    #             v0, v1, v2 = np.eye(3).tolist()
-
-    #         r = np.array([r0, r1, r2])
-
-    #         U = np.column_stack([v0, v1, v2])
-    #         V = np.diag(r**2)
-    #         S = np.dot(np.dot(U, V), U.T)
-
-    #         vol = 4 / 3 * np.pi * r0 * r1 * r2
-
-    #         Q_vol.append(vol)
-
-    #         R = peak.getGoniometerMatrix()
-
-    #         two_theta = peak.getScattering()
-    #         az_phi = peak.getAzimuthal()
-
-    #         kf_hat = np.array(
-    #             [
-    #                 np.sin(two_theta) * np.cos(az_phi),
-    #                 np.sin(two_theta) * np.sin(az_phi),
-    #                 np.cos(two_theta),
-    #             ]
-    #         )
-
-    #         ki_hat = np.array([0, 0, 1])
-
-    #         n = kf_hat - ki_hat
-    #         n /= np.linalg.norm(n)
-
-    #         u = np.cross(ki_hat, kf_hat)
-    #         u /= np.linalg.norm(u)
-
-    #         v = np.cross(n, u)
-    #         v /= np.linalg.norm(v)
-
-    #         n, u, v = R.T @ n, R.T @ u, R.T @ v
-
-    #         Q0 = 2 * np.pi * ol.getUB() @ np.array([h, k, l])
-    #         Q = peak.getQSampleFrame()
-
-    #         W = np.column_stack([n, u, v])
-
-    #         peak_err.append(W @ (Q - Q0))
-
-    #         r0 = np.sqrt(n.T @ (S @ n))
-    #         r1 = np.sqrt(u.T @ (S @ u))
-    #         r2 = np.sqrt(v.T @ (S @ v))
-
-    #         Q_rad.append([r0, r1, r2])
-
-    #     Q0_mod = np.array(Q0_mod)
-    #     powder_err = np.array(powder_err)
-    #     peak_err = np.array(peak_err) / Q0_mod[:, np.newaxis]
-    #     Q_vol = np.array(Q_vol)
-    #     Q_rad = np.array(Q_rad)
-
-    #     powder_med = np.nanmedian(powder_err)
-    #     peak_med = np.nanmedian(peak_err, axis=0)
-
-    #     powder_mad = np.nanmedian(np.abs(powder_err - powder_med))
-    #     peak_mad = np.nanmedian(np.abs(peak_err - peak_med), axis=0)
-
-    #     powder_min = powder_med - 1.5 * powder_mad
-    #     powder_max = powder_med + 1.5 * powder_mad
-
-    #     peak_min = peak_med - 1.5 * peak_mad
-    #     peak_max = peak_med + 1.5 * peak_mad
-
-    #     vol_med = np.nanmedian(Q_vol)
-    #     vol_mad = np.nanmedian(np.abs(Q_vol - vol_med))
-
-    #     vol_cut = vol_med + 1.5 * vol_mad
-
-    #     radius_med = np.nanmedian(Q_rad, axis=0)
-
-    #     radius_mad = np.nanmedian(np.abs(Q_rad - radius_med), axis=0)
-
-    #     radius_max = radius_med + 1.5 * radius_mad
-
-    #     filename = os.path.splitext(self.filename)[0]
-
-    #     fig, ax = plt.subplots(4, 2, layout="constrained", sharex=True)
-    #     ax = ax.T.ravel()
-    #     ax[3].set_xlabel("$|Q|$ [$\AA^{-1}$]")
-    #     ax[7].set_xlabel("$|Q|$ [$\AA^{-1}$]")
-    #     ax[0].set_ylabel("$d/d_0-1$")
-    #     ax[1].set_ylabel("$\Delta{Q_1}/|Q|$")
-    #     ax[2].set_ylabel("$\Delta{Q_2}/|Q|$")
-    #     ax[3].set_ylabel("$\Delta{Q_3}/|Q|$")
-    #     ax[4].set_ylabel("$V$ [$\AA^{-3}$]")
-    #     ax[5].set_ylabel("$r_1$  [$\AA^{-1}$]")
-    #     ax[6].set_ylabel("$r_2$  [$\AA^{-1}$]")
-    #     ax[7].set_ylabel("$r_3$  [$\AA^{-1}$]")
-    #     ax[0].plot(Q0_mod, powder_err, ".", color="C0", rasterized=True)
-    #     ax[1].plot(Q0_mod, peak_err[:, 0], ".", color="C1", rasterized=True)
-    #     ax[2].plot(Q0_mod, peak_err[:, 1], ".", color="C2", rasterized=True)
-    #     ax[3].plot(Q0_mod, peak_err[:, 2], ".", color="C3", rasterized=True)
-    #     ax[4].plot(Q0_mod, Q_vol, ".", color="C4", rasterized=True)
-    #     ax[5].plot(Q0_mod, Q_rad[:, 0], ".", color="C5", rasterized=True)
-    #     ax[6].plot(Q0_mod, Q_rad[:, 1], ".", color="C6", rasterized=True)
-    #     ax[7].plot(Q0_mod, Q_rad[:, 2], ".", color="C7", rasterized=True)
-    #     ax[0].axhline(powder_min, color="k", linestyle="--", linewidth=1)
-    #     ax[0].axhline(powder_max, color="k", linestyle="--", linewidth=1)
-    #     ax[1].axhline(peak_min[0], color="k", linestyle="--", linewidth=1)
-    #     ax[1].axhline(peak_max[0], color="k", linestyle="--", linewidth=1)
-    #     ax[2].axhline(peak_min[1], color="k", linestyle="--", linewidth=1)
-    #     ax[2].axhline(peak_max[1], color="k", linestyle="--", linewidth=1)
-    #     ax[3].axhline(peak_min[2], color="k", linestyle="--", linewidth=1)
-    #     ax[3].axhline(peak_max[2], color="k", linestyle="--", linewidth=1)
-    #     ax[4].axhline(vol_cut, color="k", linestyle="--", linewidth=1)
-    #     ax[5].axhline(radius_max[0], color="k", linestyle="--", linewidth=1)
-    #     ax[6].axhline(radius_max[1], color="k", linestyle="--", linewidth=1)
-    #     ax[7].axhline(radius_max[2], color="k", linestyle="--", linewidth=1)
-
-    #     for i in range(8):
-    #         ax[0].minorticks_on()
-    #         for d in d_al:
-    #             ax[i].axvline(
-    #                 2 * np.pi / d, color="k", linestyle=":", linewidth=1
-    #             )
-
-    #         for d in d_cu:
-    #             ax[i].axvline(
-    #                 2 * np.pi / d, color="k", linestyle=":", linewidth=1
-    #             )
-
-    #     fig.savefig(filename + "_cont.pdf")
-
-    #     for i, peak in enumerate(mtd[self.peaks]):
-    #         powder = powder_err[i] > powder_max or powder_err[i] < powder_min
-    #         contamination = (peak_err[i] > peak_max) | (peak_err[i] < peak_min)
-    #         background = Q_vol[i] > vol_cut
-    #         if contamination.any() or powder.any() or background:
-    #             peak.setSigmaIntensity(float("-inf"))
-
     def median_absolute_devation(self, arr):
         med = np.nanmedian(arr, axis=0)
         mad = np.nanmedian(np.abs(arr - med), axis=0)
@@ -1017,46 +808,7 @@ class Peaks:
         ol = mtd[self.peaks].sample().getOrientedLattice()
         return ol.a(), ol.b(), ol.c(), ol.alpha(), ol.beta(), ol.gamma()
 
-    def load_peaks(self):
-        LoadNexus(Filename=self.filename, OutputWorkspace=self.peaks)
-
-        merge = self.filename.replace(".nxs", "_diagnostics/merge.nxs")
-        if os.path.exists(merge):
-            LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
-
-        ub_file = self.filename.replace(".nxs", ".mat")
-
-        if os.path.exists(ub_file):
-            LoadIsawUB(Filename=ub_file, InputWorkspace=self.peaks)
-
-        self.filename = re.sub(
-            r"(_\([-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+\))+",
-            "",
-            self.filename,
-        )
-
-        # self.remove_edge_peaks()
-        self.remove_non_integrated()
-        self.remove_non_indexed()
-
-        FilterPeaks(
-            InputWorkspace=self.peaks,
-            OutputWorkspace=self.peaks,
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
-
-        self.remove_off_centered()
-
-        FilterPeaks(
-            InputWorkspace=self.peaks,
-            OutputWorkspace=self.peaks,
-            FilterVariable="Signal/Noise",
-            FilterValue=3,
-            Operator=">",
-        )
-
+    def peak_info(self):
         run_info = mtd[self.peaks].run()
         run_keys = run_info.keys()
 
@@ -1089,6 +841,7 @@ class Peaks:
             pk_norm = run_info.getLogData("peaks_pk_norm").value
             bkg_data = run_info.getLogData("peaks_bkg_data").value
             bkg_norm = run_info.getLogData("peaks_bkg_norm").value
+            ratio = run_info.getLogData("peaks_ratio").value
 
             intens = run_info.getLogData("peaks_intens").value
             sig = run_info.getLogData("peaks_sig").value
@@ -1102,13 +855,107 @@ class Peaks:
                     pk_norm[i],
                     bkg_data[i],
                     bkg_norm[i],
+                    ratio[i],
                 )
                 info_dict[key] = vals
                 norm_dict[key] = (intens[i], sig[i])
-
                 rate_dict[run[i]] = cntrt[i]
 
+        return info_dict, norm_dict, rate_dict
+
+    def update_monitor(self):
+        stat_dict = {}
+        for peak in mtd[self.peaks]:
+            run = peak.getRunNumber()
+            proton_charge = peak.getBinCount()
+            peak.setMonitorCount(proton_charge)
+            stat_dict[run] = proton_charge
+        return stat_dict
+
+    def load_peaks(self):
+        LoadNexus(Filename=self.filename, OutputWorkspace=self.peaks)
+
+        stat_dict = self.update_monitor()
+
+        merge = self.filename.replace(".nxs", "_diagnostics/merge.nxs")
+        if os.path.exists(merge):
+            LoadNexus(Filename=merge, OutputWorkspace=self.peaks + "_merge")
+
+        ub_file = self.filename.replace(".nxs", ".mat")
+
+        if os.path.exists(ub_file):
+            LoadIsawUB(Filename=ub_file, InputWorkspace=self.peaks)
+
+        self.filename = re.sub(
+            r"(_\([-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+,\s*[-+]?\d*\.?\d+\))+",
+            "",
+            self.filename,
+        )
+
+        info_dict, norm_dict, rate_dict = self.peak_info()
+
         filename = os.path.splitext(self.filename)[0]
+
+        self.info_dict = info_dict
+        self.norm_dict = norm_dict
+
+        x, y, z = [], [], []
+
+        for peak in mtd[self.peaks]:
+            h, k, l = [int(val) for val in peak.getIntHKL()]
+            m, n, p = [int(val) for val in peak.getIntMNP()]
+
+            run = int(peak.getRunNumber())
+            key = (run, h, k, l, m, n, p)
+            items = self.info_dict.get(key)
+
+            if items is not None:
+                N, vol, pk_data, pk_norm, bkg_data, bkg_norm, ratio = items
+
+                lamda = peak.getWavelength()
+                two_theta = peak.getScattering()
+                # pc = peak.getMonitorCount()
+
+                Q = 4 * np.pi / lamda * np.sin(0.5 * two_theta)
+
+                norm = N * vol
+
+                x.append(Q)
+                y.append(norm)
+                z.append(ratio)
+
+                if norm > 1.1 or norm < 0.9 or ratio > 2 or ratio < 0.125:
+                    peak.setSigmaIntensity(peak.getIntensity())
+
+        x = np.array(x)
+        y = np.array(y)
+        z = np.array(z)
+        fig, ax = plt.subplots(2, 1, sharex=True, layout="constrained")
+        ax[0].plot(x, y, ",", color="C0", rasterized=True)
+        ax[0].minorticks_on()
+        ax[0].set_ylabel("Norm")
+        ax[0].axhline(y=1.1, color="k", linestyle="--")
+        ax[0].axhline(y=0.9, color="k", linestyle="--")
+        ax[1].plot(x, z, ",", color="C1", rasterized=True)
+        ax[1].minorticks_on()
+        ax[1].axhline(y=2, color="k", linestyle="--")
+        ax[1].axhline(y=0.125, color="k", linestyle="--")
+        ax[1].set_ylabel("Ratio")
+        ax[1].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+        fig.savefig(filename + "_norm.pdf")
+
+        x, y = [], []
+
+        for key in stat_dict.keys():
+            x.append(key)
+            y.append(stat_dict[key])
+
+        fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
+        ax.set_xlabel("")
+        ax.plot(x, y, ".", rasterized=True)
+        ax.minorticks_on()
+        ax.set_ylabel("Monitor")
+        fig.savefig(filename + "_stat.pdf")
 
         x, y = [], []
 
@@ -1116,7 +963,39 @@ class Peaks:
             x.append(key)
             y.append(rate_dict[key])
 
-        # rate_ave = np.mean(y)
+        fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
+        ax.set_xlabel("")
+        ax.plot(x, y, ".", rasterized=True)
+        ax.minorticks_on()
+        ax.set_ylabel("Count rate")
+        fig.savefig(filename + "_rate.pdf")
+
+        self.remove_non_integrated()
+        self.remove_non_indexed()
+
+        FilterPeaks(
+            InputWorkspace=self.peaks,
+            OutputWorkspace=self.peaks,
+            FilterVariable="Signal/Noise",
+            FilterValue=3,
+            Operator=">",
+        )
+
+        self.remove_off_centered()
+
+        FilterPeaks(
+            InputWorkspace=self.peaks,
+            OutputWorkspace=self.peaks,
+            FilterVariable="Signal/Noise",
+            FilterValue=3,
+            Operator=">",
+        )
+
+        x, y = [], []
+
+        for key in rate_dict.keys():
+            x.append(key)
+            y.append(rate_dict[key])
 
         fig, ax = plt.subplots(1, 1, sharex=True, layout="constrained")
         ax.set_xlabel("")
@@ -1134,34 +1013,6 @@ class Peaks:
         #         scale = rate_ave / rate
         #     peak.setIntensity(scale * peak.getIntensity())
         #     peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
-
-        self.info_dict = info_dict
-        self.norm_dict = norm_dict
-
-        x, y = [], []
-
-        for peak in mtd[self.peaks]:
-            h, k, l = [int(val) for val in peak.getIntHKL()]
-            m, n, p = [int(val) for val in peak.getIntMNP()]
-
-            run = int(peak.getRunNumber())
-            key = (run, h, k, l, m, n, p)
-            items = self.info_dict.get(key)
-
-            if items is not None:
-                N, vol, pk_data, pk_norm, bkg_data, bkg_norm = items
-
-                lamda = peak.getWavelength()
-                two_theta = peak.getScattering()
-
-                norm = np.log10(bkg_norm / pk_norm)
-
-                Q = 4 * np.pi / lamda * np.sin(0.5 * two_theta)
-
-                x.append(Q)
-                y.append(norm)
-
-        filename = os.path.splitext(self.filename)[0]
 
         lamda = np.array(mtd[self.peaks].column("Wavelength"))
 
@@ -1257,14 +1108,6 @@ class Peaks:
             ind = inds[i]
             if y[ind] == 0:
                 peak.setSigmaIntensity(peak.getIntensity())
-
-        # FilterPeaks(
-        #     InputWorkspace=self.peaks,
-        #     OutputWorkspace=self.peaks,
-        #     FilterVariable="Signal/Noise",
-        #     FilterValue=3,
-        #     Operator=">",
-        # )
 
         SolidAngle(InputWorkspace="sa", OutputWorkspace="solid_angle")
 
