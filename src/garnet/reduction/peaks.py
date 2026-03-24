@@ -705,8 +705,6 @@ class PeaksModel:
 
         """
 
-        d_max = self.get_max_d_spacing(ws)
-
         refl_cond = centering_reflection[centering]
 
         if centering == "R":  # obverse/reverse
@@ -723,7 +721,7 @@ class PeaksModel:
                 WavelengthMin=lamda_min,
                 WavelengthMax=lamda_max,
                 MinDSpacing=d_min,
-                MaxDSpacing=d_max * 1.2,
+                MaxDSpacing="inf",
                 ReflectionCondition=refl_cond,
                 RoundHKL=True,
                 EdgePixels=self.edge_pixels,

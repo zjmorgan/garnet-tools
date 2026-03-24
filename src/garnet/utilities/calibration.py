@@ -2,6 +2,7 @@ import os
 import sys
 
 import yaml
+import pprint
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -58,6 +59,8 @@ class Calibration:
 
         defaults.update(config)
 
+        pprint.pp(defaults)
+
         self.instrument = defaults.get("Instrument")
         self.instrument_definition = defaults.get("InstrumentDefinition")
 
@@ -106,7 +109,7 @@ class Calibration:
 
         for peak in mtd["peaks"]:
             peak.setIntensity(0)
-            peak.setSigmaIntensity(uc.d(*peak.getIntHKL()))  #
+            peak.setSigmaIntensity(0)  # uc.d(*peak.getIntHKL())
             peak.setBinCount(0)
             run = peak.getRunNumber()
             R = peak.getGoniometerMatrix().copy()
@@ -283,6 +286,8 @@ class Calibration:
 
         IndexPeaks(PeaksWorkspace="peaks")
 
+        mtd["peaks"].run().getGoniometer().setR(np.eye(3))
+
     def load_instrument(self):
         LoadEmptyInstrument(
             Filename=self.instrument_definition,
@@ -308,6 +313,7 @@ class Calibration:
     def calibrate_instrument(self, iteration):
         SCDCalibratePanels(
             PeakWorkspace="peaks",
+            RecalculateUB=False,
             Tolerance=0.2,
             a=self.a,
             b=self.b,
@@ -322,18 +328,19 @@ class Calibration:
             CalibrateT0=False,
             SearchRadiusT0=10,
             CalibrateL1=True,
-            SearchRadiusL1=0.5,
+            SearchRadiusL1=0.2,
             CalibrateBanks=True,
-            SearchRadiusTransBank=0.5,
-            SearchRadiusRotXBank=15 if self.instrument != "CORELLI" else 0,
-            SearchRadiusRotYBank=15,
-            SearchRadiusRotZBank=15 if self.instrument != "CORELLI" else 0,
+            SearchRadiusTransBank=0.2,
+            SearchRadiusRotXBank=3 if self.instrument != "CORELLI" else 0,
+            SearchRadiusRotYBank=3,
+            SearchRadiusRotZBank=3 if self.instrument != "CORELLI" else 0,
             VerboseOutput=True,
             SearchRadiusSamplePos=0.01,
             TuneSamplePosition=True,
-            CalibrateSize=self.instrument != "CORELLI",
-            SearchRadiusSize=0.15,
-            FixAspectRatio=False,
+            CalibrateSize=False,
+            SearchRadiusSize=0.0,
+            FixAspectRatio=True,
+            MaxFitIterations=100000,
         )
 
         LoadParameterFile(
@@ -378,6 +385,16 @@ class Calibration:
             run = peak.getRunNumber()
             R = self.goniometer_dict[run]
             peak.setGoniometerMatrix(R)
+
+        CalculateUMatrix(
+            PeaksWorkspace="peaks_ws",
+            a=self.a,
+            b=self.b,
+            c=self.c,
+            alpha=self.alpha,
+            beta=self.beta,
+            gamma=self.gamma,
+        )
 
         IndexPeaks(PeaksWorkspace="peaks_ws")
 
@@ -658,7 +675,7 @@ class Calibration:
                 pdf.savefig(fig)
                 plt.close()
 
-                self.d_dict = d_dict
+                # self.d_dict = d_dict
 
         PreprocessDetectorsToMD(
             InputWorkspace=self.instrument, OutputWorkspace="detectors"
@@ -805,7 +822,7 @@ class Calibration:
             self.initialize_peaks()
             self.generate_diagnostic(iteration)
             self.calibrate_instrument(iteration)
-            self.calibrate_goniometer(iteration)
+            # self.calibrate_goniometer(iteration)
         self.generate_diagnostic(self.iterations)
 
 

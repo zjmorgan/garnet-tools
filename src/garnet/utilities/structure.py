@@ -7,6 +7,8 @@ sys.path.append(directory)
 directory = os.path.abspath(os.path.join(directory, "../.."))
 sys.path.append(directory)
 
+import pprint
+
 import numpy as np
 
 from garnet.utilities.reflections import AbsorptionCorrection, Peaks
@@ -152,7 +154,7 @@ if __name__ == "__main__":
         config.update(params["Material"])
     if params.get("Integration") is not None:
         config.update(params["Integration"])
-    print(config)
+    pprint.pp(config)
 
     inst = Integration(params)
 

@@ -26,7 +26,14 @@ from qtpy.QtWidgets import (
     QMessageBox,
 )
 
-from qtpy.QtGui import QDoubleValidator, QIntValidator, QFont, QIcon
+from qtpy.QtGui import (
+    QDoubleValidator,
+    QIntValidator,
+    QFont,
+    QIcon,
+    QPixmap,
+    QPainter,
+)
 from qtpy.QtCore import Qt, QProcess
 
 from qdarkstyle.light.palette import LightPalette
@@ -37,7 +44,11 @@ from garnet._version import __version__
 
 from garnet.config.instruments import beamlines
 from garnet.reduction.plan import ReductionPlan
-from garnet.reduction.crystallography import space_point, point_laue
+from garnet.reduction.crystallography import (
+    space_point,
+    point_laue,
+    space_number,
+)
 
 
 class FormView(QWidget):
@@ -78,6 +89,7 @@ class FormView(QWidget):
         self.load_button = QPushButton("Load Config", self)
         self.save_button = QPushButton("Save Config", self)
         self.stop_button = QPushButton("Stop Process", self)
+        self.stop_button.setIcon(qta.icon("fa6s.stop"))
 
         self.load_button.setIcon(qta.icon("fa6s.folder-open"))
         self.save_button.setIcon(qta.icon("fa6s.floppy-disk"))
@@ -185,6 +197,8 @@ class FormView(QWidget):
         self.cell_combo.addItem("Hexagonal")
         self.cell_combo.addItem("Cubic")
 
+        self.auto_scale_dropdown(self.cell_combo)
+
         self.centering_combo = QComboBox(self)
         self.centering_combo.addItem("P")
         self.centering_combo.addItem("I")
@@ -194,6 +208,8 @@ class FormView(QWidget):
         self.centering_combo.addItem("B")
         self.centering_combo.addItem("C")
         self.centering_combo.addItem("H")
+
+        self.auto_scale_dropdown(self.centering_combo)
 
         radius_label = QLabel("Radius:")
         radius_unit_label = QLabel("Å⁻¹")
@@ -263,12 +279,9 @@ class FormView(QWidget):
         int_layout.addWidget(self.mod_32_line, 3, 6)
         int_layout.addWidget(self.mod_33_line, 3, 7)
 
-        self.profile_box = QCheckBox("Profile Fit")
-        self.profile_box.setChecked(True)
-
         self.int_run_button = QPushButton("Run Integration", self)
+        self.int_run_button.setIcon(qta.icon("fa6s.play"))
 
-        profile_layout.addWidget(self.profile_box)
         profile_layout.addStretch(1)
         profile_layout.addWidget(self.int_run_button)
 
@@ -279,6 +292,71 @@ class FormView(QWidget):
         tab.setLayout(layout)
 
         return tab
+
+    def auto_scale_dropdown(self, combo):
+        """
+        Autoscale a combobox width to fit text plus any icons/checks.
+
+        This keeps the drop-down (and closed state) wide enough for the
+        longest item label while leaving extra room for icons or check
+        indicators drawn on the left-hand side.
+        """
+
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+
+        fm = combo.fontMetrics()
+        max_width = 0
+
+        digit = all(
+            [combo.itemText(i).isdigit() for i in range(combo.count())]
+        )
+
+        keys = space_number.keys()
+
+        for i in range(combo.count()):
+            text = combo.itemText(i)
+            icon = qta.icon("fa6s.hashtag" if digit else "fa6s.minus")
+            if text == "TOPAZ":
+                icon = qta.icon("fa6s.gem")
+            elif text == "CORELLI":
+                icon = qta.icon("fa6s.scissors")
+            elif text == "MANDI":
+                icon = qta.icon("fa6s.dna")
+            elif text == "WAND²":
+                icon = qta.icon("fa6s.wand-magic")
+            elif text == "DEMAND":
+                icon = qta.icon("fa6s.magnet")
+            elif text == "SNAP":
+                icon = qta.icon("fa6s.weight-scale")
+            elif text == "IMAGINE":
+                icon = qta.icon("fa6s.lightbulb")
+            elif text in keys:
+                no = str(space_number[text])
+                pixmap = QPixmap(64, 64)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                p = QPainter(pixmap)
+                p.setFont(QFont("Arial", 32))
+                p.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, no)
+                p.end()
+                icon = QIcon(pixmap)
+
+            combo.setItemIcon(i, icon)
+
+        for i in range(combo.count()):
+            text = combo.itemText(i)
+            text_width = fm.horizontalAdvance(text)
+
+            icon = combo.itemIcon(i)
+            icon_width = 0
+            if not icon.isNull():
+                size = icon.actualSize(combo.iconSize())
+                icon_width = size.width() + 8
+
+            max_width = max(max_width, text_width + icon_width)
+
+        if max_width:
+            padding = 40
+            combo.setMinimumWidth(max_width + padding)
 
     def connect_satellite_box(self, update):
         self.satellite_box.stateChanged.connect(update)
@@ -380,13 +458,6 @@ class FormView(QWidget):
 
     def set_radius(self, r):
         self.radius_line.setText(str(r))
-
-    def get_profile_fit(self):
-        return self.profile_box.isChecked()
-
-    def set_profile_fit(self, state):
-        state = True if state is None else state
-        self.profile_box.setChecked(state)
 
     def clear_satellite(self):
         check = self.satellite_box.isChecked()
@@ -584,6 +655,7 @@ class FormView(QWidget):
         self.miller_l_line.setValidator(validator)
 
         self.param_run_button = QPushButton("Run Parametrization", self)
+        self.param_run_button.setIcon(qta.icon("fa6s.play"))
 
         miller_layout.addWidget(self.miller_box)
         miller_layout.addWidget(miller_h_label)
@@ -941,13 +1013,34 @@ class FormView(QWidget):
         self.symmetry_combo.addItem("Space Group")
         self.symmetry_combo.addItem("Point Group")
 
+        self.auto_scale_dropdown(self.symmetry_combo)
+
         self.symmetry_options_combo = QComboBox(self)
 
         self.norm_run_button = QPushButton("Run Normalization", self)
+        self.norm_run_button.setIcon(qta.icon("fa6s.play"))
+
+        self.auto_proj_button = QPushButton("Auto Project", self)
+        self.auto_bin_button = QPushButton("Auto Bin", self)
+
+        res_label = QLabel("d(min) [Å]:")
+
+        self.res_line = QLineEdit("0.7")
+
+        notation = QDoubleValidator.StandardNotation
+
+        validator = QDoubleValidator(0.3, 100, 5, notation=notation)
+
+        self.res_line.setValidator(validator)
 
         symmetry_layout.addWidget(symmetry_label)
         symmetry_layout.addWidget(self.symmetry_combo)
         symmetry_layout.addWidget(self.symmetry_options_combo)
+        symmetry_layout.addStretch(1)
+        symmetry_layout.addWidget(self.auto_proj_button)
+        symmetry_layout.addWidget(res_label)
+        symmetry_layout.addWidget(self.res_line)
+        symmetry_layout.addWidget(self.auto_bin_button)
         symmetry_layout.addStretch(1)
         symmetry_layout.addWidget(self.norm_run_button)
 
@@ -989,6 +1082,12 @@ class FormView(QWidget):
     def connect_norm_bins_3_line(self, update):
         self.norm_bins_3_line.editingFinished.connect(update)
 
+    def connect_auto_projection(self, auto_proj):
+        self.auto_proj_button.clicked.connect(auto_proj)
+
+    def connect_auto_binning(self, auto_bin):
+        self.auto_bin_button.clicked.connect(auto_bin)
+
     def get_symmetry(self):
         return self.symmetry_combo.currentText()
 
@@ -1001,6 +1100,7 @@ class FormView(QWidget):
         self.symmetry_options_combo.clear()
         for symmetry in symmetries:
             self.symmetry_options_combo.addItem(symmetry)
+        self.auto_scale_dropdown(self.symmetry_options_combo)
 
     def set_symmetry_option(self, symmetry):
         index = self.symmetry_options_combo.findText(symmetry)
@@ -1111,6 +1211,14 @@ class FormView(QWidget):
         for item, param in zip(items, params):
             param.setText(str(item))
 
+    def get_norm_resolution_min(self):
+        param = self.res_line
+        if param.hasAcceptableInput():
+            return float(param.text())
+
+    def set_norm_resolution_min(self, d_min):
+        self.res_line.setText(str(d_min))
+
     def str_to_number(self, s):
         if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
             return int(s)
@@ -1132,7 +1240,11 @@ class FormView(QWidget):
         self.instrument_combo.addItem("CORELLI")
         self.instrument_combo.addItem("SNAP")
 
+        self.auto_scale_dropdown(self.instrument_combo)
+
         self.grouping_combo = QComboBox(self)
+
+        self.auto_scale_dropdown(self.grouping_combo)
 
         self.elastic_box = QCheckBox("Elastic")
 
@@ -1179,7 +1291,7 @@ class FormView(QWidget):
 
         self.ub_browse_button = QPushButton("UB", self)
         self.bkg_browse_button = QPushButton("Background", self)
-        self.van_browse_button = QPushButton("Vanadium", self)
+        self.van_browse_button = QPushButton("Solid Angle", self)
         self.flux_browse_button = QPushButton("Flux", self)
         self.cal_browse_button = QPushButton("Detector", self)
         self.tube_browse_button = QPushButton("Tube", self)
@@ -1400,7 +1512,7 @@ class FormView(QWidget):
         file_filters = "Vanadium files (*.nxs)"
 
         filename, _ = file_dialog.getOpenFileName(
-            self, "Load vanadim file", path, file_filters, options=options
+            self, "Load vanadiim file", path, file_filters, options=options
         )
 
         return filename
@@ -1689,6 +1801,9 @@ class FormPresenter:
         self.view.connect_norm_bins_2_line(self.update_norm_step_2)
         self.view.connect_norm_bins_3_line(self.update_norm_step_3)
 
+        self.view.connect_auto_binning(self.auto_bin)
+        self.view.connect_auto_projection(self.auto_proj)
+
     def run_integration(self):
         self.run_command("i")
 
@@ -1741,6 +1856,31 @@ class FormPresenter:
             step = self.model.calculate_step(*limits, bins)
             self.view.set_param_step_4(step)
 
+    def auto_proj(self):
+        UB_file = self.view.get_UB()
+        if UB_file is not None:
+            UB = self.model.load_UB_matrix(UB_file)
+            W = self.model.autoproj(UB)
+            self.view.set_norm_projections(W)
+
+    def auto_bin(self):
+        UB_file = self.view.get_UB()
+        if UB_file is not None:
+            UB = self.model.load_UB_matrix(UB_file)
+            W = self.view.get_norm_projections()
+            d_min = self.view.get_norm_resolution_min()
+            bins = self.model.autolim(UB, W, d_min)
+            X_max, Y_max, Z_max, X_bins, Y_bins, Z_bins = bins
+            self.view.set_norm_bins_1(X_bins)
+            self.view.set_norm_bins_2(Y_bins)
+            self.view.set_norm_bins_3(Z_bins)
+            self.view.set_norm_limits_1([-X_max, X_max])
+            self.view.set_norm_limits_2([-Y_max, Y_max])
+            self.view.set_norm_limits_3([-Z_max, Z_max])
+            self.update_norm_step_1()
+            self.update_norm_step_2()
+            self.update_norm_step_3()
+
     def update_symmetry(self):
         symmetry = self.view.get_symmetry()
         if symmetry == "None":
@@ -1748,7 +1888,9 @@ class FormPresenter:
         elif symmetry == "Point Group":
             symmetries = point_laue.keys()
         else:
-            symmetries = space_point.keys()
+            keys = list(space_point.keys())
+            nos = list(space_number.values())
+            symmetries = [x for _, x in sorted(zip(nos, keys))]
         self.view.set_symmetry_options(symmetries)
 
     def find_symmetry(self, option):
@@ -2030,7 +2172,6 @@ class FormPresenter:
                 min_d,
                 sat_min_d,
                 radius,
-                profile_fit,
             ) = params
             self.view.set_satellite(max_order > 0)
             self.view.clear_satellite()
@@ -2044,7 +2185,6 @@ class FormPresenter:
             self.view.set_min_d(min_d)
             self.view.set_sat_min_d(sat_min_d)
             self.view.set_radius(radius)
-            self.view.set_profile_fit(profile_fit)
 
     def save_int(self):
         centering = self.view.get_centering()
@@ -2057,7 +2197,6 @@ class FormPresenter:
         min_d = self.view.get_min_d()
         sat_min_d = self.view.get_sat_min_d()
         radius = self.view.get_radius()
-        profile_fit = self.view.get_profile_fit()
         self.model.set_int(
             cell,
             centering,
@@ -2069,7 +2208,6 @@ class FormPresenter:
             min_d,
             sat_min_d,
             radius,
-            profile_fit,
         )
 
     def load_param(self):
@@ -2165,7 +2303,6 @@ class FormModel:
                 min_d = params["MinD"]
                 sat_min_d = params.get("SatMinD")
                 radius = params["Radius"]
-                profile_fit = params.get("ProfileFit")
                 return (
                     cell,
                     centering,
@@ -2177,7 +2314,6 @@ class FormModel:
                     min_d,
                     sat_min_d,
                     radius,
-                    profile_fit,
                 )
 
     def set_int(
@@ -2192,7 +2328,6 @@ class FormModel:
         min_d,
         sat_min_d,
         radius,
-        profile_fit,
     ):
         if self.reduction.plan is not None:
             params = {}
@@ -2206,7 +2341,6 @@ class FormModel:
             params["MinD"] = min_d
             params["SatMinD"] = sat_min_d
             params["Radius"] = radius
-            params["ProfileFit"] = profile_fit
             self.reduction.plan["Integration"] = params
 
     def get_param(self):
@@ -2488,7 +2622,7 @@ class FormModel:
             "Vanadium",
         )
 
-    def load_UB(filename, beam=2, up=1, back=0):
+    def load_UB_matrix(self, filename, beam=2, up=1, back=0):
         UB = np.zeros((3, 3), dtype=float)
 
         with open(filename, "r") as f:
@@ -2514,28 +2648,40 @@ class FormModel:
 
         return UB
 
-    def autolim(UB, W, d_min):
-        s_max = 1 / d_min
+    def autoproj(self, UB):
+        v = np.linalg.inv(UB) @ [0, 1, 0]
+        v = v / np.linalg.norm(v)
+
+        projections = {
+            "hk0": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            "h0l": [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+            "0kl": [[0, 1, 0], [0, 0, 1], [1, 0, 0]],
+            "hhl": [[1, 1, 0], [0, 0, 1], [-1, 1, 0]],
+            "-hhl": [[-1, 1, 0], [0, 0, 1], [1, 1, 0]],
+        }
+
+        proj = "hk0"
+        similarity = 0
+        for key in projections.keys():
+            vec = np.array(projections[key][2]).astype(float)
+            vec /= np.linalg.norm(vec)
+            test = np.abs(np.dot(vec, v))
+            if test > similarity:
+                proj = key
+                similarity = test
+
+        return projections[proj]
+
+    def autolim(self, UB, W, d_min):
+        s_max = 1 / d_min / np.sqrt(3)
 
         T = np.linalg.inv(UB @ W)
 
-        X_max = np.floor(T @ [s_max, 0, 0])
-        Y_max = np.floor(T @ [0, s_max, 0])
-        Z_max = np.floor(T @ [0, 0, s_max])
+        X_max = np.abs(np.floor(T @ [s_max, 0, 0])).max()
+        Y_max = np.abs(np.floor(T @ [0, s_max, 0])).max()
+        Z_max = np.abs(np.floor(T @ [0, 0, s_max / 2])).max()
 
-        return X_max, Y_max, Z_max
-
-    def estimate_projection(self, UB):
-        UB_inv = np.linalg.inv(UB)
-
-        vert = UB_inv @ [0, 1, 0]
-        vert /= np.abs(vert).max()
-
-        A = [[0, 1, 0]] @ UB
-        beam, horz = scipy.linalg.null_space(A).T
-
-        beam /= np.abs(beam).max()
-        horz /= np.abs(horz).max()
+        return X_max, Y_max, Z_max, 501, 501, 101
 
 
 class Garnet(QMainWindow):

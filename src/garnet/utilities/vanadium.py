@@ -37,6 +37,7 @@ from mantid.simpleapi import (
     ClearMaskFlag,
     InvertMask,
     ExtractMask,
+    ExtractMonitors,
     SetSample,
     SetBeam,
     AbsorptionCorrection,
@@ -123,6 +124,9 @@ class Vanadium:
             Filename=self.instrument_definition,
             InstrumentName=self.instrument,
             OutputWorkspace=self.instrument,
+        )
+        ExtractMonitors(
+            InputWorkspace=self.instrument, DetectorWorkspace=self.instrument
         )
         CreateGroupingWorkspace(
             InputWorkspace=self.instrument,

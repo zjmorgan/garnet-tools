@@ -704,11 +704,11 @@ class Peaks:
             )
 
             ax[0].minorticks_on()
-            ax[3].set_xlabel(r"$Q$ [$\AA^{-1}$]")
-            ax[0].set_ylabel(r"$\Delta{Q}_1$ [$\AA^{-1}$]")
-            ax[1].set_ylabel(r"$\Delta{Q}_2$ [$\AA^{-1}$]")
-            ax[2].set_ylabel(r"$\Delta{Q}_3$ [$\AA^{-1}$]")
-            ax[3].set_ylabel(r"$|\Delta{Q}|$ [$\AA^{-1}$]")
+            ax[3].set_xlabel(r"$Q$ [\AA$^{-1}$]")
+            ax[0].set_ylabel(r"$\Delta{Q}_1$ [\AA$^{-1}$]")
+            ax[1].set_ylabel(r"$\Delta{Q}_2$ [\AA$^{-1}$]")
+            ax[2].set_ylabel(r"$\Delta{Q}_3$ [\AA$^{-1}$]")
+            ax[3].set_ylabel(r"$|\Delta{Q}|$ [\AA$^{-1}$]")
 
             pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
@@ -734,11 +734,11 @@ class Peaks:
             )
 
             ax[0].minorticks_on()
-            ax[3].set_xlabel(r"$Q$ [$\AA^{-1}$]")
-            ax[0].set_ylabel(r"$r_1$ [$\AA^{-1}$]")
-            ax[1].set_ylabel(r"$r_2$ [$\AA^{-1}$]")
-            ax[2].set_ylabel(r"$r_3$ [$\AA^{-1}$]")
-            ax[3].set_ylabel(r"$r$ [$\AA^{-1}$]")
+            ax[3].set_xlabel(r"$Q$ [\AA$^{-1}$]")
+            ax[0].set_ylabel(r"$r_1$ [\AA$^{-1}$]")
+            ax[1].set_ylabel(r"$r_2$ [\AA$^{-1}$]")
+            ax[2].set_ylabel(r"$r_3$ [\AA$^{-1}$]")
+            ax[3].set_ylabel(r"$r$ [\AA$^{-1}$]")
 
             pdf.savefig(fig, dpi=300, bbox_inches=None)
             plt.close(fig)
@@ -758,9 +758,9 @@ class Peaks:
                 )
                 ax[i].set_aspect(1)
                 ax[i].minorticks_on()
-                ax[i].set_xlabel(r"$r_{}$".format(i + 1) + " [$\AA^{-1}$]")
+                ax[i].set_xlabel(r"$r_{}$".format(i + 1) + " [\AA$^{-1}$]")
 
-            ax[0].set_ylabel(r"$\Delta{Q}_i$ [$\AA^{-1}$]")
+            ax[0].set_ylabel(r"$\Delta{Q}_i$ [\AA$^{-1}$]")
 
             for i in range(3):
                 for j, peak in enumerate(mtd[self.peaks]):
@@ -941,7 +941,7 @@ class Peaks:
         ax[1].axhline(y=2, color="k", linestyle="--")
         ax[1].axhline(y=0.125, color="k", linestyle="--")
         ax[1].set_ylabel("Ratio")
-        ax[1].set_xlabel("$|Q|$ [$\AA^{-1}$]")
+        ax[1].set_xlabel("$|Q|$ [\AA$^{-1}$]")
         fig.savefig(filename + "_norm.pdf")
 
         x, y = [], []
@@ -1004,15 +1004,17 @@ class Peaks:
         ax.set_ylabel("Count rate")
         fig.savefig(filename + "_rate.pdf")
 
-        # for peak in mtd[self.peaks]:
-        #     run = int(peak.getRunNumber())
-        #     rate = rate_dict.get(run)
-        #     if rate is None:
-        #         scale = 0
-        #     else:
-        #         scale = rate_ave / rate
-        #     peak.setIntensity(scale * peak.getIntensity())
-        #     peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
+        rate_ave = np.mean([rate_dict.get(key) for key in rate_dict.keys()])
+
+        for peak in mtd[self.peaks]:
+            run = int(peak.getRunNumber())
+            rate = rate_dict.get(run)
+            if rate is None:
+                scale = 0
+            else:
+                scale = rate_ave / rate
+            peak.setIntensity(scale * peak.getIntensity())
+            peak.setSigmaIntensity(scale * peak.getSigmaIntensity())
 
         lamda = np.array(mtd[self.peaks].column("Wavelength"))
 
