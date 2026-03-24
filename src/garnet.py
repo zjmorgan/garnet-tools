@@ -2713,7 +2713,7 @@ class FormModel:
 
         h_max, k_max, l_max = np.maximum(limits, 1)
 
-        return h_max, k_max, l_max, n
+        return h_max, k_max, l_max, n, n, n
 
 
 class Garnet(QMainWindow):
