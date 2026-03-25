@@ -60,7 +60,6 @@ from mantid.simpleapi import (
     CompressEvents,
     GenerateEventsFilter,
     FilterEvents,
-    FilterBadPulses,
     CopySample,
     DeleteWorkspace,
     DeleteWorkspaces,
@@ -1372,7 +1371,7 @@ class LaueData(BaseDataModel):
 
         return total_events / total_charge
 
-    def calculate_maximum_Q(self, scale=np.sqrt(3)):
+    def calculate_maximum_Q(self, scale=1):
         """
         Update maximum Q.
 
@@ -1512,12 +1511,6 @@ class LaueData(BaseDataModel):
 
             if not mtd.doesExist("solid_angle"):
                 SolidAngle(InputWorkspace=ws, OutputWorkspace="solid_angle")
-
-                # Divide(
-                #     LHSWorkspace="sa",
-                #     RHSWorkspace="solid_angle",
-                #     OutputWorkspace="sa",
-                # )
 
                 inds = mtd["solid_angle"].getIndicesFromDetectorIDs(
                     self.det_IDs

@@ -97,8 +97,8 @@ class Calibration:
             InputWorkspace="peaks",
             OutputWorkspace="peaks",
             FilterVariable="Signal/Noise",
-            FilterValue=10,
-            Operator=">",
+            FilterValue=0,
+            Operator=">=",
         )
 
         uc = UnitCell(
@@ -337,8 +337,8 @@ class Calibration:
             VerboseOutput=True,
             SearchRadiusSamplePos=0.01,
             TuneSamplePosition=True,
-            CalibrateSize=False,
-            SearchRadiusSize=0.0,
+            CalibrateSize=True,
+            SearchRadiusSize=0.2,
             FixAspectRatio=True,
             MaxFitIterations=100000,
         )
@@ -822,7 +822,7 @@ class Calibration:
             self.initialize_peaks()
             self.generate_diagnostic(iteration)
             self.calibrate_instrument(iteration)
-            # self.calibrate_goniometer(iteration)
+            self.calibrate_goniometer(iteration)
         self.generate_diagnostic(self.iterations)
 
 
