@@ -152,7 +152,7 @@ def _process_run(config, ipts, run, idx, tol):
         Tolerance=tol,
         Iterations=3,
         NumInitial=100,
-        FixParameters=False,
+        FixParameters=True,
     )
 
     IndexPeaks(PeaksWorkspace=strong_ws, Tolerance=tol, RoundHKLs=True)
